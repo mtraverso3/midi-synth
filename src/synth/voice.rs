@@ -72,6 +72,11 @@ impl Voice {
         self.envelope.release();
     }
 
+    pub fn kill(&mut self) {
+        self.envelope.reset();
+        self.note = None;
+    }
+
     pub fn next_sample(&mut self) -> f32 {
         let osc = (self.oscillator.next_sample() + self.detuned.next_sample()) * 0.5;
         let filtered = self.filter.process(osc);

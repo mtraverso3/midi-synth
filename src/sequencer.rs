@@ -1,10 +1,23 @@
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use crate::midi::{Event, EventKind};
 use crate::synth::SynthCommand;
+
+/// How often the play loop wakes to advance the song clock and fire due events.
+const TICK: Duration = Duration::from_millis(4);
+
+/// Seconds jumped by one seek step.
+pub const SEEK_STEP: f64 = 5.0;
+
+/// A transport command from the UI to the play loop.
+pub enum Control {
+    TogglePause,
+    Seek(f64),
+    Stop,
+}
 
 /// Live snapshot of what's playing, shared with the TUI. `active[ch]` is a
 /// bitmask of sounding notes on that channel; `seen` marks channels that have
@@ -15,44 +28,106 @@ pub struct Monitor {
     pub programs: [u8; 16],
     pub seen: u16,
     pub notes_played: u64,
+    pub song_time: f64,
+    pub paused: bool,
     pub finished: bool,
 }
 
 pub type SharedMonitor = Arc<Mutex<Monitor>>;
 
-/// Plays events through `tx`, sleeping until each one's absolute timestamp so
-/// scheduling error can't accumulate over the song. Assumes `events` is sorted
-/// by `time_s`. Updates `monitor` (if given) as notes start and stop.
+/// Plays events through `tx` using a song clock that advances in real time
+/// while running and freezes while paused, reacting to transport `controls`.
+/// `total_s` is the full length (including release tail) so the clock keeps
+/// running past the last event. Assumes `events` is sorted by `time_s`.
 pub fn play(
     events: &[Event],
     tx: &Sender<SynthCommand>,
+    total_s: f64,
     verbose: bool,
     monitor: Option<&SharedMonitor>,
+    controls: &Receiver<Control>,
 ) {
-    let start = Instant::now();
+    let mut song_time = 0.0f64;
+    let mut next = 0usize; // index of the next event to fire
+    let mut paused = false;
+    let mut last = Instant::now();
 
-    for event in events {
-        let target = Duration::from_secs_f64(event.time_s);
-        let elapsed = start.elapsed();
-        if target > elapsed {
-            sleep(target - elapsed);
+    loop {
+        for control in controls.try_iter() {
+            match control {
+                Control::Stop => return,
+                Control::TogglePause => {
+                    paused = !paused;
+                    let _ = tx.send(SynthCommand::SetPaused(paused));
+                }
+                Control::Seek(delta) => {
+                    song_time = (song_time + delta).clamp(0.0, total_s);
+                    next = seek(events, tx, song_time, monitor);
+                }
+            }
         }
 
-        if verbose {
-            log_event(event, start.elapsed().as_secs_f64());
+        let now = Instant::now();
+        let dt = now.duration_since(last).as_secs_f64();
+        last = now;
+        if !paused {
+            song_time += dt;
         }
+
+        while next < events.len() && events[next].time_s <= song_time {
+            let event = &events[next];
+            if verbose {
+                log_event(event, song_time);
+            }
+            if let Some(monitor) = monitor {
+                update_monitor(monitor, event);
+            }
+            if tx.send(to_command(event)).is_err() {
+                return;
+            }
+            next += 1;
+        }
+
         if let Some(monitor) = monitor {
-            update_monitor(monitor, event);
+            let mut m = monitor.lock().unwrap();
+            m.song_time = song_time;
+            m.paused = paused;
         }
 
-        if tx.send(to_command(event)).is_err() {
+        if next >= events.len() && song_time >= total_s {
             break;
         }
+        sleep(TICK);
     }
 
     if let Some(monitor) = monitor {
         monitor.lock().unwrap().finished = true;
     }
+}
+
+/// Jump the synth to `song_time`: silence held notes, then rebuild per-channel
+/// program state from the events before the target and rewind the event cursor.
+fn seek(
+    events: &[Event],
+    tx: &Sender<SynthCommand>,
+    song_time: f64,
+    monitor: Option<&SharedMonitor>,
+) -> usize {
+    let _ = tx.send(SynthCommand::AllNotesOff);
+
+    let index = events.partition_point(|e| e.time_s < song_time);
+    for event in &events[..index] {
+        if let EventKind::ProgramChange { .. } = event.kind {
+            let _ = tx.send(to_command(event));
+        }
+    }
+
+    if let Some(monitor) = monitor {
+        let mut m = monitor.lock().unwrap();
+        m.active = [0; 16];
+        m.song_time = song_time;
+    }
+    index
 }
 
 fn update_monitor(monitor: &SharedMonitor, event: &Event) {

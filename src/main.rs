@@ -7,6 +7,7 @@ mod synth;
 mod tui;
 
 use std::path::PathBuf;
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -67,26 +68,33 @@ fn main() {
     }
 
     println!("Loaded {} events from {}", events.len(), cli.file.display());
+    let total_s = total_seconds(&events);
     let (_stream, tx) = audio::build_stream();
+    let (_ctl_tx, ctl_rx) = mpsc::channel();
     println!("Playing...");
-    sequencer::play(&events, &tx, cli.verbose, None);
+    sequencer::play(&events, &tx, total_s, cli.verbose, None, &ctl_rx);
 
     thread::sleep(Duration::from_millis(500));
     println!("Done.");
 }
 
+fn total_seconds(events: &[midi::Event]) -> f64 {
+    events.last().map(|e| e.time_s).unwrap_or(0.0) + TAIL_SECONDS
+}
+
 fn play_with_tui(events: Vec<midi::Event>, title: String) {
-    let total_s = events.last().map(|e| e.time_s).unwrap_or(0.0) + TAIL_SECONDS;
+    let total_s = total_seconds(&events);
     let monitor = Arc::new(Mutex::new(sequencer::Monitor::default()));
+    let (ctl_tx, ctl_rx) = mpsc::channel();
 
     let (_stream, tx) = audio::build_stream();
 
     let player_monitor = monitor.clone();
     let player = thread::spawn(move || {
-        sequencer::play(&events, &tx, false, Some(&player_monitor));
+        sequencer::play(&events, &tx, total_s, false, Some(&player_monitor), &ctl_rx);
     });
 
-    if let Err(e) = tui::run(&monitor, &title, total_s) {
+    if let Err(e) = tui::run(&monitor, &ctl_tx, &title, total_s) {
         eprintln!("tui error: {e}");
     }
     let _ = player.join();

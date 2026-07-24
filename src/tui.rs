@@ -1,5 +1,6 @@
 use std::io;
-use std::time::{Duration, Instant};
+use std::sync::mpsc::Sender;
+use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::terminal::{
@@ -13,7 +14,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Gauge, Paragraph};
 
-use crate::sequencer::{Monitor, SharedMonitor};
+use crate::sequencer::{Control, Monitor, SEEK_STEP, SharedMonitor};
 use crate::synth::family_name;
 
 /// Lowest and highest MIDI notes drawn in each channel's keyboard strip (an
@@ -35,50 +36,68 @@ const CHANNEL_COLORS: [Color; 8] = [
     Color::LightGreen,
 ];
 
-/// Run the visualizer until playback finishes or the user quits. `title` names
-/// the file and `total_s` is the song length used for the progress bar.
-pub fn run(monitor: &SharedMonitor, title: &str, total_s: f64) -> io::Result<()> {
+/// Run the visualizer until playback finishes or the user quits, sending
+/// transport commands to the play loop via `controls`. `title` names the file
+/// and `total_s` is the song length used for the progress bar.
+pub fn run(
+    monitor: &SharedMonitor,
+    controls: &Sender<Control>,
+    title: &str,
+    total_s: f64,
+) -> io::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
 
-    let start = Instant::now();
     let result = loop {
         let snapshot = *monitor.lock().unwrap();
-        let elapsed = start.elapsed().as_secs_f64();
 
-        if let Err(e) = terminal.draw(|f| draw(f, &snapshot, title, elapsed, total_s)) {
+        if let Err(e) = terminal.draw(|f| draw(f, &snapshot, title, total_s)) {
             break Err(e);
         }
-        if snapshot.finished && elapsed >= total_s {
+        if snapshot.finished {
             break Ok(());
         }
-        if quit_requested()? {
+        if handle_input(controls)?.is_some() {
             break Ok(());
         }
     };
 
+    let _ = controls.send(Control::Stop);
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
     result
 }
 
-fn quit_requested() -> io::Result<bool> {
+/// Poll for a keypress; returns `Some(())` when the user asks to quit.
+fn handle_input(controls: &Sender<Control>) -> io::Result<Option<()>> {
     if !event::poll(Duration::from_millis(33))? {
-        return Ok(false);
+        return Ok(None);
     }
     if let Event::Key(key) = event::read()? {
         let ctrl_c = key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
-        if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) || ctrl_c {
-            return Ok(true);
+        match key.code {
+            KeyCode::Char('q') | KeyCode::Esc => return Ok(Some(())),
+            _ if ctrl_c => return Ok(Some(())),
+            KeyCode::Char(' ') => {
+                let _ = controls.send(Control::TogglePause);
+            }
+            KeyCode::Left => {
+                let _ = controls.send(Control::Seek(-SEEK_STEP));
+            }
+            KeyCode::Right => {
+                let _ = controls.send(Control::Seek(SEEK_STEP));
+            }
+            _ => {}
         }
     }
-    Ok(false)
+    Ok(None)
 }
 
-fn draw(frame: &mut ratatui::Frame, monitor: &Monitor, title: &str, elapsed: f64, total_s: f64) {
+fn draw(frame: &mut ratatui::Frame, monitor: &Monitor, title: &str, total_s: f64) {
+    let elapsed = monitor.song_time;
     let channels: Vec<usize> = (0..16).filter(|&c| monitor.seen & (1 << c) != 0).collect();
     let voices: u32 = monitor.active.iter().map(|m| m.count_ones()).sum();
     let active_channels = monitor.active.iter().filter(|m| **m != 0).count();
@@ -95,15 +114,20 @@ fn draw(frame: &mut ratatui::Frame, monitor: &Monitor, title: &str, elapsed: f64
     } else {
         0.0
     };
+    let (marker, color) = if monitor.paused {
+        ("⏸ PAUSED", Color::Yellow)
+    } else {
+        ("▶", Color::Cyan)
+    };
     let gauge = Gauge::default()
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(format!(" ♪ {title} ")),
         )
-        .gauge_style(Style::default().fg(Color::Cyan))
+        .gauge_style(Style::default().fg(color))
         .ratio(ratio)
-        .label(format!("{elapsed:5.1}s / {total_s:5.1}s"));
+        .label(format!("{marker}  {elapsed:5.1}s / {total_s:5.1}s"));
     frame.render_widget(gauge, areas[0]);
 
     let mut lines = vec![octave_ruler()];
@@ -123,7 +147,7 @@ fn draw(frame: &mut ratatui::Frame, monitor: &Monitor, title: &str, elapsed: f64
             monitor.notes_played,
         )),
         Line::from(Span::styled(
-            "  press q or Esc to quit",
+            "  space pause    ← → seek 5s    q quit",
             Style::default().fg(Color::DarkGray),
         )),
     ])

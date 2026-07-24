@@ -15,11 +15,16 @@ pub enum SynthCommand {
     NoteOn { channel: u8, note: u8, velocity: u8 },
     NoteOff { channel: u8, note: u8 },
     ProgramChange { channel: u8, program: u8 },
+    /// Freeze/unfreeze the whole synth (for pause).
+    SetPaused(bool),
+    /// Immediately silence every voice (for seek).
+    AllNotesOff,
 }
 
 pub struct Synth {
     voices: Vec<Voice>,
     programs: [u8; CHANNEL_COUNT],
+    paused: bool,
 }
 
 impl Synth {
@@ -27,6 +32,7 @@ impl Synth {
         Self {
             voices: (0..VOICE_COUNT).map(|_| Voice::new(sample_rate)).collect(),
             programs: [0; CHANNEL_COUNT],
+            paused: false,
         }
     }
 
@@ -51,6 +57,12 @@ impl Synth {
             SynthCommand::ProgramChange { channel, program } => {
                 self.programs[channel as usize] = program;
             }
+            SynthCommand::SetPaused(paused) => self.paused = paused,
+            SynthCommand::AllNotesOff => {
+                for voice in &mut self.voices {
+                    voice.kill();
+                }
+            }
         }
     }
 
@@ -71,6 +83,11 @@ impl Synth {
     }
 
     pub fn next_sample(&mut self) -> f32 {
+        // While paused, hold silence and don't advance any voice, so notes that
+        // were sounding resume seamlessly.
+        if self.paused {
+            return 0.0;
+        }
         let mixed: f32 = self
             .voices
             .iter_mut()

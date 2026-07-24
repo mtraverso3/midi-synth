@@ -57,6 +57,11 @@ impl Envelope {
         self.stage = Stage::Release;
     }
 
+    pub fn reset(&mut self) {
+        self.stage = Stage::Idle;
+        self.level = 0.0;
+    }
+
     pub fn is_finished(&self) -> bool {
         self.stage == Stage::Idle
     }
