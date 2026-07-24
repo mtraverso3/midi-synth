@@ -45,6 +45,8 @@ pub struct Voice {
     amplitude: f32,
     /// Note-off arrived but the sustain pedal is holding this voice.
     sustained: bool,
+    /// Polyphonic aftertouch for this note alone.
+    pressure: f32,
     transient_level: f32,
     vibrato_depth: f32,
     vibrato_age_s: f32,
@@ -79,6 +81,7 @@ impl Voice {
             detune_ratio: DETUNE,
             amplitude: 0.0,
             sustained: false,
+            pressure: 0.0,
             transient_level: 0.0,
             vibrato_depth: 0.0,
             vibrato_age_s: 0.0,
@@ -118,6 +121,11 @@ impl Voice {
         self.sustained = true;
     }
 
+    /// Polyphonic key pressure, which leans on this note's vibrato alone.
+    pub fn set_pressure(&mut self, pressure: f32) {
+        self.pressure = pressure;
+    }
+
     /// Current loudness (0.0..1.0), used to steal the quietest voice.
     pub fn level(&self) -> f32 {
         self.envelope.level() * self.amplitude
@@ -131,6 +139,7 @@ impl Voice {
         self.channel = channel;
         self.note = Some(note);
         self.sustained = false;
+        self.pressure = 0.0;
         self.age = 0;
         self.filter_countdown = 0;
 
@@ -202,7 +211,7 @@ impl Voice {
     /// its mod wheel and aftertouch are asking for.
     pub fn next_sample(&mut self, pitch_scale: f32, modulation: f32) -> f32 {
         self.age = self.age.saturating_add(1);
-        let depth = self.vibrato_depth + modulation;
+        let depth = self.vibrato_depth + modulation + self.pressure;
         let vibrato = if depth > 0.0 {
             self.vibrato_age_s += 1.0 / self.sample_rate;
             let onset = (self.vibrato_age_s / VIBRATO_ONSET_S).min(1.0);

@@ -42,8 +42,11 @@ to the engine, so a SoundFont receives even the ones the built-in synth ignores.
 | CC6 / CC38 / CC96 / CC97 | data entry, for RPN 0 |
 | CC120-127 | channel mode: all sound off, all notes off, reset controllers |
 
-SMF formats 0 and 1 are supported. Format 2 and SMPTE timecode division are
-rejected with an error rather than played incorrectly.
+Polyphonic key pressure leans on the vibrato of the single note it names.
+
+SMF formats 0 and 1 are supported, with either metrical or SMPTE timecode
+division. Format 2 holds independent sequences rather than one piece, so it is
+rejected rather than played stacked.
 
 The master bus ends in a look-ahead limiter, so polyphony sets the density of
 the music rather than its volume: a dense passage is turned down as a whole

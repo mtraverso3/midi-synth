@@ -17,6 +17,8 @@ use crate::engine::{Command, Engine, write_frame};
 const VOICE_COUNT: usize = 8192;
 const CHANNEL_COUNT: usize = 16;
 const MASTER_GAIN: f32 = 0.3;
+/// Vibrato that full polyphonic key pressure adds to a single note.
+const POLY_PRESSURE_DEPTH: f32 = 0.02;
 /// How much reverb is folded back in; enough to place the notes in a room.
 const REVERB_MIX: f32 = 0.22;
 
@@ -193,9 +195,19 @@ impl Engine for Synth {
             Command::ChannelPressure { channel, pressure } => {
                 self.channels[channel as usize].pressure = f32::from(pressure) / 127.0;
             }
-            // Per-note pressure needs per-note modulation, which this synth does
-            // not have; the SoundFont engine honours it.
-            Command::PolyPressure { .. } => {}
+            Command::PolyPressure {
+                channel,
+                note,
+                pressure,
+            } => {
+                let depth = f32::from(pressure) / 127.0 * POLY_PRESSURE_DEPTH;
+                for &index in &self.sounding {
+                    let voice = &mut self.voices[index];
+                    if voice.is_active() && voice.matches(channel, note) {
+                        voice.set_pressure(depth);
+                    }
+                }
+            }
             // Intercepted by the pause gate in `engine`.
             Command::SetPaused(_) => {}
             Command::AllNotesOff => {
