@@ -5,7 +5,7 @@ mod voice;
 
 use voice::Voice;
 
-const VOICE_COUNT: usize = 32;
+const VOICE_COUNT: usize = 64;
 const CHANNEL_COUNT: usize = 16;
 const MASTER_GAIN: f32 = 0.3;
 
@@ -53,7 +53,18 @@ impl Synth {
     }
 
     fn allocate_voice(&mut self) -> &mut Voice {
-        let index = self.voices.iter().position(|v| !v.is_active()).unwrap_or(0);
+        // Prefer an idle voice; if all are busy, steal the quietest one so the
+        // interruption is as inaudible as possible.
+        if let Some(index) = self.voices.iter().position(|v| !v.is_active()) {
+            return &mut self.voices[index];
+        }
+        let index = self
+            .voices
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| a.level().total_cmp(&b.level()))
+            .map(|(i, _)| i)
+            .unwrap_or(0);
         &mut self.voices[index]
     }
 

@@ -61,6 +61,10 @@ impl Envelope {
         self.stage == Stage::Idle
     }
 
+    pub fn level(&self) -> f32 {
+        self.level
+    }
+
     pub fn next_sample(&mut self) -> f32 {
         match self.stage {
             Stage::Idle => self.level = 0.0,

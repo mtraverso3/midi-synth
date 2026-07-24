@@ -32,6 +32,12 @@ impl Voice {
         !self.envelope.is_finished()
     }
 
+    /// Current output weight (0.0..1.0), used to pick the least audible voice
+    /// to steal when the pool is full.
+    pub fn level(&self) -> f32 {
+        self.envelope.level() * self.amplitude
+    }
+
     pub fn matches(&self, channel: u8, note: u8) -> bool {
         self.note == Some(note) && self.channel == channel
     }
