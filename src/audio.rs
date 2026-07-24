@@ -14,12 +14,10 @@ pub fn build_stream(soundfont: Option<SoundFont>) -> Result<(Stream, Sender<Comm
         .default_output_device()
         .expect("no output device available");
 
-    let supported_config = device
-        .supported_output_configs()
-        .expect("error while querying configs")
-        .next()
-        .expect("no supported config?!")
-        .with_max_sample_rate();
+    // Ask for the device's current configuration. Picking one out of
+    // `supported_output_configs` instead can select a Bluetooth headset's
+    // hands-free rate, which switches it into call mode and opens its mic.
+    let supported_config = device.default_output_config()?;
 
     let sample_format = supported_config.sample_format();
     let config = supported_config.into();
