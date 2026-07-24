@@ -2,10 +2,12 @@ mod envelope;
 mod filter;
 mod instrument;
 mod oscillator;
+mod reverb;
 mod rng;
 mod voice;
 
 pub use instrument::family_name;
+use reverb::Reverb;
 use voice::Voice;
 
 use crate::engine::{Command, Engine, write_frame};
@@ -13,12 +15,15 @@ use crate::engine::{Command, Engine, write_frame};
 const VOICE_COUNT: usize = 256;
 const CHANNEL_COUNT: usize = 16;
 const MASTER_GAIN: f32 = 0.3;
+/// How much reverb is folded back in; enough to place the notes in a room.
+const REVERB_MIX: f32 = 0.22;
 
 pub struct Synth {
     voices: Vec<Voice>,
     programs: [u8; CHANNEL_COUNT],
     sustain: [bool; CHANNEL_COUNT],
     volume: [f32; CHANNEL_COUNT],
+    reverb: Reverb,
 }
 
 impl Synth {
@@ -30,6 +35,7 @@ impl Synth {
             programs: [0; CHANNEL_COUNT],
             sustain: [false; CHANNEL_COUNT],
             volume: [1.0; CHANNEL_COUNT],
+            reverb: Reverb::new(sample_rate),
         }
     }
 
@@ -49,15 +55,20 @@ impl Synth {
         &mut self.voices[index]
     }
 
-    fn next_sample(&mut self) -> f32 {
+    fn next_frame(&mut self) -> (f32, f32) {
         let volume = &self.volume;
-        let mixed: f32 = self
+        let dry: f32 = self
             .voices
             .iter_mut()
             .filter(|v| v.is_active())
             .map(|v| v.next_sample() * volume[v.channel() as usize])
             .sum();
-        (mixed * MASTER_GAIN).clamp(-1.0, 1.0)
+        let dry = dry * MASTER_GAIN;
+        let (left, right) = self.reverb.process(dry);
+        (
+            (dry + left * REVERB_MIX).clamp(-1.0, 1.0),
+            (dry + right * REVERB_MIX).clamp(-1.0, 1.0),
+        )
     }
 }
 
@@ -115,8 +126,8 @@ impl Engine for Synth {
 
     fn fill(&mut self, data: &mut [f32], channels: usize) {
         for frame in data.chunks_mut(channels) {
-            let sample = self.next_sample();
-            write_frame(frame, sample, sample);
+            let (left, right) = self.next_frame();
+            write_frame(frame, left, right);
         }
     }
 }
