@@ -3,24 +3,14 @@ use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use crate::midi::{Event, EventKind};
+use crate::smf::{Event, EventKind};
 use crate::synth::SynthCommand;
-
-/// How often the play loop wakes to advance the song clock and fire due events.
-const TICK: Duration = Duration::from_millis(4);
 
 /// Seconds jumped by one seek step.
 pub const SEEK_STEP: f64 = 5.0;
 
-/// A transport command from the UI to the play loop.
-pub enum Control {
-    TogglePause,
-    Seek(f64),
-    Stop,
-}
-
-/// Live snapshot of what's playing, shared with the TUI. `active[ch]` is a
-/// bitmask of sounding notes on that channel; `seen` marks channels that have
+/// Live snapshot of what's playing, shared with the visualizer. `active[ch]` is
+/// a bitmask of sounding notes on that channel; `seen` marks channels that have
 /// ever played so the UI only shows those.
 #[derive(Default, Clone, Copy)]
 pub struct Monitor {
@@ -33,7 +23,60 @@ pub struct Monitor {
     pub finished: bool,
 }
 
+impl Monitor {
+    /// Fold one event into the snapshot's note/program state.
+    pub fn apply(&mut self, event: &Event) {
+        let ch = event.channel as usize;
+        self.seen |= 1 << ch;
+        match event.kind {
+            EventKind::NoteOn { note, .. } => {
+                self.active[ch] |= 1 << note;
+                self.notes_played += 1;
+            }
+            EventKind::NoteOff { note } => self.active[ch] &= !(1 << note),
+            EventKind::ProgramChange { program } => self.programs[ch] = program,
+            EventKind::Sustain { .. } | EventKind::Volume { .. } => {}
+        }
+    }
+}
+
 pub type SharedMonitor = Arc<Mutex<Monitor>>;
+
+pub fn to_command(event: &Event) -> SynthCommand {
+    match event.kind {
+        EventKind::NoteOn { note, velocity } => SynthCommand::NoteOn {
+            channel: event.channel,
+            note,
+            velocity,
+        },
+        EventKind::NoteOff { note } => SynthCommand::NoteOff {
+            channel: event.channel,
+            note,
+        },
+        EventKind::ProgramChange { program } => SynthCommand::ProgramChange {
+            channel: event.channel,
+            program,
+        },
+        EventKind::Sustain { on } => SynthCommand::Sustain {
+            channel: event.channel,
+            on,
+        },
+        EventKind::Volume { level } => SynthCommand::SetVolume {
+            channel: event.channel,
+            level,
+        },
+    }
+}
+
+/// How often the play loop wakes to advance the song clock and fire events.
+const TICK: Duration = Duration::from_millis(4);
+
+/// A transport command from the UI to the play loop.
+pub enum Control {
+    TogglePause,
+    Seek(f64),
+    Stop,
+}
 
 /// Plays sorted `events` through `tx` on a song clock that advances in real
 /// time, freezes while paused, and jumps on seek — driven by `controls`.
@@ -47,7 +90,7 @@ pub fn play(
     controls: &Receiver<Control>,
 ) {
     let mut song_time = 0.0f64;
-    let mut next = 0usize; // index of the next event to fire
+    let mut next = 0usize;
     let mut paused = false;
     let mut last = Instant::now();
 
@@ -79,7 +122,7 @@ pub fn play(
                 log_event(event, song_time);
             }
             if let Some(monitor) = monitor {
-                update_monitor(monitor, event);
+                monitor.lock().unwrap().apply(event);
             }
             if tx.send(to_command(event)).is_err() {
                 return;
@@ -104,9 +147,8 @@ pub fn play(
     }
 }
 
-/// Jump the synth to `song_time`: silence held notes, then rebuild per-channel
-/// state (program, volume, sustain) from the events before the target and
-/// rewind the event cursor.
+/// Jump the synth to `song_time`: silence held notes, rebuild per-channel
+/// state (program, volume, sustain) from earlier events, rewind the cursor.
 fn seek(
     events: &[Event],
     tx: &Sender<SynthCommand>,
@@ -133,47 +175,6 @@ fn seek(
     index
 }
 
-fn update_monitor(monitor: &SharedMonitor, event: &Event) {
-    let mut m = monitor.lock().unwrap();
-    let ch = event.channel as usize;
-    m.seen |= 1 << ch;
-    match event.kind {
-        EventKind::NoteOn { note, .. } => {
-            m.active[ch] |= 1 << note;
-            m.notes_played += 1;
-        }
-        EventKind::NoteOff { note } => m.active[ch] &= !(1 << note),
-        EventKind::ProgramChange { program } => m.programs[ch] = program,
-        EventKind::Sustain { .. } | EventKind::Volume { .. } => {}
-    }
-}
-
-pub fn to_command(event: &Event) -> SynthCommand {
-    match event.kind {
-        EventKind::NoteOn { note, velocity } => SynthCommand::NoteOn {
-            channel: event.channel,
-            note,
-            velocity,
-        },
-        EventKind::NoteOff { note } => SynthCommand::NoteOff {
-            channel: event.channel,
-            note,
-        },
-        EventKind::ProgramChange { program } => SynthCommand::ProgramChange {
-            channel: event.channel,
-            program,
-        },
-        EventKind::Sustain { on } => SynthCommand::Sustain {
-            channel: event.channel,
-            on,
-        },
-        EventKind::Volume { level } => SynthCommand::SetVolume {
-            channel: event.channel,
-            level,
-        },
-    }
-}
-
 fn log_event(event: &Event, now: f64) {
     let ch = event.channel;
     match event.kind {
@@ -188,12 +189,10 @@ fn log_event(event: &Event, now: f64) {
         EventKind::ProgramChange { program } => {
             println!("[{now:7.3}s] ch{ch:2} program   {program}")
         }
-        EventKind::Sustain { on } => {
-            println!(
-                "[{now:7.3}s] ch{ch:2} sustain   {}",
-                if on { "on" } else { "off" }
-            )
-        }
+        EventKind::Sustain { on } => println!(
+            "[{now:7.3}s] ch{ch:2} sustain   {}",
+            if on { "on" } else { "off" }
+        ),
         EventKind::Volume { level } => println!("[{now:7.3}s] ch{ch:2} volume    {level}"),
     }
 }

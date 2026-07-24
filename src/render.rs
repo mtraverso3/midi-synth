@@ -1,7 +1,7 @@
 use crate::TAIL_SECONDS;
 use crate::engine::Engine;
-use crate::midi::Event;
 use crate::sequencer::to_command;
+use crate::smf::Event;
 
 /// Samples rendered per block between events.
 const CHUNK: usize = 512;

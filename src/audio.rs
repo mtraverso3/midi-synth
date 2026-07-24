@@ -5,8 +5,8 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample, Stream};
 use rustysynth::SoundFont;
 
-use crate::engine;
-use crate::synth::SynthCommand;
+use midi::engine;
+use midi::synth::SynthCommand;
 
 pub fn build_stream(soundfont: Option<Arc<SoundFont>>) -> (Stream, Sender<SynthCommand>) {
     let host = cpal::default_host();

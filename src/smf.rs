@@ -25,7 +25,11 @@ const DEFAULT_TEMPO_US_PER_BEAT: u32 = 500_000;
 
 pub fn load(path: impl AsRef<Path>) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
     let bytes = std::fs::read(path)?;
-    let smf = Smf::parse(&bytes)?;
+    parse(&bytes)
+}
+
+pub fn parse(bytes: &[u8]) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
+    let smf = Smf::parse(bytes)?;
 
     let ticks_per_beat = match smf.header.timing {
         Timing::Metrical(t) => t.as_int() as f64,

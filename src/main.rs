@@ -1,11 +1,5 @@
 mod audio;
-mod engine;
-mod midi;
 mod output;
-mod render;
-mod sequencer;
-mod soundfont;
-mod synth;
 mod tui;
 
 use std::path::PathBuf;
@@ -16,6 +10,9 @@ use std::time::Duration;
 
 use clap::Parser;
 use rustysynth::SoundFont;
+
+use midi::sequencer::Monitor;
+use midi::{TAIL_SECONDS, engine, render, sequencer, smf, soundfont};
 
 /// A MIDI file player with a built-in software synthesizer.
 #[derive(Parser)]
@@ -44,13 +41,10 @@ struct Cli {
 
 const SAMPLE_RATE: u32 = 44_100;
 
-/// Silence rendered after the last event so release tails aren't clipped.
-pub(crate) const TAIL_SECONDS: f64 = 2.0;
-
 fn main() {
     let cli = Cli::parse();
 
-    let events = load_or_exit(midi::load(&cli.file));
+    let events = load_or_exit(smf::load(&cli.file));
     println!("Loaded {} events from {}", events.len(), cli.file.display());
 
     let soundfont = cli.soundfont.as_ref().map(|path| {
@@ -94,13 +88,13 @@ fn load_or_exit<T>(result: Result<T, Box<dyn std::error::Error>>) -> T {
     })
 }
 
-fn total_seconds(events: &[midi::Event]) -> f64 {
+fn total_seconds(events: &[smf::Event]) -> f64 {
     events.last().map(|e| e.time_s).unwrap_or(0.0) + TAIL_SECONDS
 }
 
-fn play_with_tui(events: Vec<midi::Event>, soundfont: Option<Arc<SoundFont>>, title: String) {
+fn play_with_tui(events: Vec<smf::Event>, soundfont: Option<Arc<SoundFont>>, title: String) {
     let total_s = total_seconds(&events);
-    let monitor = Arc::new(Mutex::new(sequencer::Monitor::default()));
+    let monitor = Arc::new(Mutex::new(Monitor::default()));
     let (ctl_tx, ctl_rx) = mpsc::channel();
 
     let (_stream, tx) = audio::build_stream(soundfont);
