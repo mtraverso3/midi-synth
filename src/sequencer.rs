@@ -2,13 +2,13 @@ use std::sync::mpsc::Sender;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use crate::midi::{NoteEvent, NoteEventKind};
+use crate::midi::{Event, EventKind};
 use crate::synth::SynthCommand;
 
 /// Plays events through `tx`, sleeping until each one's absolute timestamp so
 /// scheduling error can't accumulate over the song. Assumes `events` is sorted
 /// by `time_s`.
-pub fn play(events: &[NoteEvent], tx: &Sender<SynthCommand>, verbose: bool) {
+pub fn play(events: &[Event], tx: &Sender<SynthCommand>, verbose: bool) {
     let start = Instant::now();
 
     for event in events {
@@ -23,11 +23,19 @@ pub fn play(events: &[NoteEvent], tx: &Sender<SynthCommand>, verbose: bool) {
         }
 
         let command = match event.kind {
-            NoteEventKind::On { velocity } => SynthCommand::NoteOn {
-                note: event.note,
+            EventKind::NoteOn { note, velocity } => SynthCommand::NoteOn {
+                channel: event.channel,
+                note,
                 velocity,
             },
-            NoteEventKind::Off => SynthCommand::NoteOff { note: event.note },
+            EventKind::NoteOff { note } => SynthCommand::NoteOff {
+                channel: event.channel,
+                note,
+            },
+            EventKind::ProgramChange { program } => SynthCommand::ProgramChange {
+                channel: event.channel,
+                program,
+            },
         };
         if tx.send(command).is_err() {
             return;
@@ -35,18 +43,20 @@ pub fn play(events: &[NoteEvent], tx: &Sender<SynthCommand>, verbose: bool) {
     }
 }
 
-fn log_event(event: &NoteEvent, now: f64) {
+fn log_event(event: &Event, now: f64) {
+    let ch = event.channel;
     match event.kind {
-        NoteEventKind::On { velocity } => println!(
-            "[{now:7.3}s] NOTE ON   {:<4} (#{:3})  vel {velocity}",
-            note_name(event.note),
-            event.note,
+        EventKind::NoteOn { note, velocity } => println!(
+            "[{now:7.3}s] ch{ch:2} NOTE ON   {:<4} (#{note:3})  vel {velocity}",
+            note_name(note),
         ),
-        NoteEventKind::Off => println!(
-            "[{now:7.3}s] note off  {:<4} (#{:3})",
-            note_name(event.note),
-            event.note,
+        EventKind::NoteOff { note } => println!(
+            "[{now:7.3}s] ch{ch:2} note off  {:<4} (#{note:3})",
+            note_name(note),
         ),
+        EventKind::ProgramChange { program } => {
+            println!("[{now:7.3}s] ch{ch:2} program   {program}")
+        }
     }
 }
 

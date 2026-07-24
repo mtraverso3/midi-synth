@@ -1,39 +1,53 @@
 mod envelope;
+mod instrument;
 mod oscillator;
 mod voice;
 
 use voice::Voice;
 
-const VOICE_COUNT: usize = 16;
+const VOICE_COUNT: usize = 32;
+const CHANNEL_COUNT: usize = 16;
 const MASTER_GAIN: f32 = 0.3;
 
 pub enum SynthCommand {
-    NoteOn { note: u8, velocity: u8 },
-    NoteOff { note: u8 },
+    NoteOn { channel: u8, note: u8, velocity: u8 },
+    NoteOff { channel: u8, note: u8 },
+    ProgramChange { channel: u8, program: u8 },
 }
 
 pub struct Synth {
     voices: Vec<Voice>,
+    programs: [u8; CHANNEL_COUNT],
 }
 
 impl Synth {
     pub fn new(sample_rate: f32) -> Self {
         Self {
             voices: (0..VOICE_COUNT).map(|_| Voice::new(sample_rate)).collect(),
+            programs: [0; CHANNEL_COUNT],
         }
     }
 
     pub fn handle(&mut self, command: SynthCommand) {
         match command {
-            SynthCommand::NoteOn { note, velocity } => {
-                self.allocate_voice().note_on(note, velocity);
+            SynthCommand::NoteOn {
+                channel,
+                note,
+                velocity,
+            } => {
+                let program = self.programs[channel as usize];
+                let waveform = instrument::waveform_for(channel, program);
+                self.allocate_voice().note_on(channel, note, velocity, waveform);
             }
-            SynthCommand::NoteOff { note } => {
+            SynthCommand::NoteOff { channel, note } => {
                 for voice in &mut self.voices {
-                    if voice.note() == Some(note) && voice.is_active() {
+                    if voice.is_active() && voice.matches(channel, note) {
                         voice.note_off();
                     }
                 }
+            }
+            SynthCommand::ProgramChange { channel, program } => {
+                self.programs[channel as usize] = program;
             }
         }
     }

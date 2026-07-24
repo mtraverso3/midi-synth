@@ -51,6 +51,10 @@ impl Oscillator {
         self.phase_step = freq / self.sample_rate;
     }
 
+    pub fn set_waveform(&mut self, waveform: Waveform) {
+        self.waveform = waveform;
+    }
+
     pub fn next_sample(&mut self) -> f32 {
         let value = self.waveform.sample(self.phase);
         self.phase = (self.phase + self.phase_step).fract();

@@ -3,21 +3,22 @@ use std::path::Path;
 use midly::{MetaMessage, MidiMessage, Smf, Timing, TrackEventKind};
 
 #[derive(Debug, Clone, Copy)]
-pub enum NoteEventKind {
-    On { velocity: u8 },
-    Off,
+pub enum EventKind {
+    NoteOn { note: u8, velocity: u8 },
+    NoteOff { note: u8 },
+    ProgramChange { program: u8 },
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct NoteEvent {
+pub struct Event {
     pub time_s: f64,
-    pub note: u8,
-    pub kind: NoteEventKind,
+    pub channel: u8,
+    pub kind: EventKind,
 }
 
 const DEFAULT_TEMPO_US_PER_BEAT: u32 = 500_000;
 
-pub fn load(path: impl AsRef<Path>) -> Result<Vec<NoteEvent>, Box<dyn std::error::Error>> {
+pub fn load(path: impl AsRef<Path>) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
     let bytes = std::fs::read(path)?;
     let smf = Smf::parse(&bytes)?;
 
@@ -57,30 +58,34 @@ pub fn load(path: impl AsRef<Path>) -> Result<Vec<NoteEvent>, Box<dyn std::error
         current_seconds += delta_ticks * seconds_per_tick;
         last_tick = tick;
 
-        match kind {
-            TrackEventKind::Meta(MetaMessage::Tempo(t)) => us_per_beat = t.as_int() as f64,
-            TrackEventKind::Midi { message, .. } => match message {
-                MidiMessage::NoteOn { key, vel } if vel.as_int() == 0 => events.push(NoteEvent {
-                    time_s: current_seconds,
-                    note: key.as_int(),
-                    kind: NoteEventKind::Off,
-                }),
-                MidiMessage::NoteOn { key, vel } => events.push(NoteEvent {
-                    time_s: current_seconds,
-                    note: key.as_int(),
-                    kind: NoteEventKind::On {
-                        velocity: vel.as_int(),
-                    },
-                }),
-                MidiMessage::NoteOff { key, .. } => events.push(NoteEvent {
-                    time_s: current_seconds,
-                    note: key.as_int(),
-                    kind: NoteEventKind::Off,
-                }),
-                _ => {}
-            },
-            _ => {}
+        if let TrackEventKind::Meta(MetaMessage::Tempo(t)) = kind {
+            us_per_beat = t.as_int() as f64;
+            continue;
         }
+
+        let TrackEventKind::Midi { channel, message } = kind else {
+            continue;
+        };
+        let channel = channel.as_int();
+        let kind = match message {
+            MidiMessage::NoteOn { key, vel } if vel.as_int() == 0 => {
+                EventKind::NoteOff { note: key.as_int() }
+            }
+            MidiMessage::NoteOn { key, vel } => EventKind::NoteOn {
+                note: key.as_int(),
+                velocity: vel.as_int(),
+            },
+            MidiMessage::NoteOff { key, .. } => EventKind::NoteOff { note: key.as_int() },
+            MidiMessage::ProgramChange { program } => EventKind::ProgramChange {
+                program: program.as_int(),
+            },
+            _ => continue,
+        };
+        events.push(Event {
+            time_s: current_seconds,
+            channel,
+            kind,
+        });
     }
 
     Ok(events)

@@ -4,6 +4,7 @@ use super::oscillator::{Oscillator, Waveform};
 pub struct Voice {
     oscillator: Oscillator,
     envelope: Envelope,
+    channel: u8,
     note: Option<u8>,
     amplitude: f32,
 }
@@ -11,8 +12,9 @@ pub struct Voice {
 impl Voice {
     pub fn new(sample_rate: f32) -> Self {
         Self {
-            oscillator: Oscillator::new(sample_rate, Waveform::Triangle),
+            oscillator: Oscillator::new(sample_rate, Waveform::Saw),
             envelope: Envelope::new(sample_rate, 0.01, 0.1, 0.7, 0.2),
+            channel: 0,
             note: None,
             amplitude: 0.0,
         }
@@ -22,13 +24,15 @@ impl Voice {
         !self.envelope.is_finished()
     }
 
-    pub fn note(&self) -> Option<u8> {
-        self.note
+    pub fn matches(&self, channel: u8, note: u8) -> bool {
+        self.note == Some(note) && self.channel == channel
     }
 
-    pub fn note_on(&mut self, note: u8, velocity: u8) {
+    pub fn note_on(&mut self, channel: u8, note: u8, velocity: u8, waveform: Waveform) {
+        self.channel = channel;
         self.note = Some(note);
         self.amplitude = velocity as f32 / 127.0;
+        self.oscillator.set_waveform(waveform);
         self.oscillator.set_frequency(note_to_freq(note));
         self.envelope.trigger();
     }
