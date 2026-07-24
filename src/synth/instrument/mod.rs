@@ -38,6 +38,8 @@ pub struct Instrument {
     pub fixed_pitch: Option<f32>,
     /// Filter resonance, relative to the patch's own. Sound controller 71 moves it.
     pub resonance: f32,
+    /// Output trim, for balancing one instrument against the rest of the set.
+    pub level: f32,
 }
 
 pub const FOREVER: f32 = 1.0e9;
@@ -60,6 +62,7 @@ const BASE: Instrument = Instrument {
     pitch_drop_s: 0.02,
     fixed_pitch: None,
     resonance: 1.0,
+    level: 1.0,
 };
 
 /// Hammered or mallet-struck: instant onset, then a long ring down to silence.

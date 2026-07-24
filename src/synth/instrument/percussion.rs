@@ -14,6 +14,7 @@ pub fn voice(note: u8) -> Instrument {
             cutoff_ratio: 4.0,
             brightness: 3.0,
             fixed_pitch: Some(600.0),
+            level: 1.00,
             ..HIT
         }, // hand clap
         40 => snare(240.0, 0.13, 0.85),
@@ -28,6 +29,7 @@ pub fn voice(note: u8) -> Instrument {
             brightness: 4.0,
             brightness_decay_s: 0.2,
             fixed_pitch: Some(900.0),
+            level: 0.66,
             ..HIT
         }, // open hi-hat
         47 => tom(165.0),
@@ -43,6 +45,7 @@ pub fn voice(note: u8) -> Instrument {
             transient: 0.4,
             fixed_pitch: Some(1100.0),
             waveform: Waveform::Triangle,
+            level: 0.77,
             ..HIT
         }, // ride bell
         54 => Instrument {
@@ -50,6 +53,7 @@ pub fn voice(note: u8) -> Instrument {
             cutoff_ratio: 11.0,
             brightness: 5.0,
             fixed_pitch: Some(1000.0),
+            level: 0.84,
             ..HIT
         }, // tambourine
         55 => cymbal(1.0, 13.0), // splash
@@ -60,6 +64,7 @@ pub fn voice(note: u8) -> Instrument {
             brightness: 6.0,
             transient: 0.4,
             fixed_pitch: Some(830.0),
+            level: 0.66,
             ..HIT
         }, // cowbell
         57 => cymbal(1.5, 11.0), // crash 2
@@ -68,6 +73,7 @@ pub fn voice(note: u8) -> Instrument {
             cutoff_ratio: 7.0,
             brightness: 5.0,
             fixed_pitch: Some(700.0),
+            level: 0.55,
             ..HIT
         }, // vibraslap
         59 => ride(0.9),         // ride 2
@@ -110,6 +116,7 @@ fn kick(pitch: f32, decay_s: f32) -> Instrument {
         pitch_drop: 14.0,
         pitch_drop_s: 0.03,
         fixed_pitch: Some(pitch),
+        level: 2.95,
         ..HIT
     }
 }
@@ -127,6 +134,7 @@ fn snare(pitch: f32, decay_s: f32, noise_mix: f32) -> Instrument {
         pitch_drop: 3.0,
         pitch_drop_s: 0.02,
         fixed_pitch: Some(pitch),
+        level: 0.97,
         ..HIT
     }
 }
@@ -143,6 +151,7 @@ fn tom(pitch: f32) -> Instrument {
         pitch_drop: 5.0,
         pitch_drop_s: 0.05,
         fixed_pitch: Some(pitch),
+        level: 1.36,
         ..HIT
     }
 }
@@ -154,6 +163,7 @@ fn hat(decay_s: f32) -> Instrument {
         brightness: 4.0,
         brightness_decay_s: 0.02,
         fixed_pitch: Some(1000.0),
+        level: 0.86,
         ..HIT
     }
 }
@@ -166,6 +176,7 @@ fn cymbal(decay_s: f32, cutoff_ratio: f32) -> Instrument {
         brightness: 3.0,
         brightness_decay_s: 0.5,
         fixed_pitch: Some(800.0),
+        level: 0.61,
         ..HIT
     }
 }
@@ -178,6 +189,7 @@ fn ride(decay_s: f32) -> Instrument {
         brightness_decay_s: 0.1,
         transient: 0.35,
         fixed_pitch: Some(900.0),
+        level: 0.51,
         ..HIT
     }
 }
@@ -193,6 +205,7 @@ fn hand_drum(pitch: f32) -> Instrument {
         noise_mix: 0.2,
         pitch_drop: 2.0,
         fixed_pitch: Some(pitch),
+        level: 1.26,
         ..HIT
     }
 }
@@ -205,6 +218,7 @@ fn agogo(pitch: f32) -> Instrument {
         brightness: 7.0,
         transient: 0.4,
         fixed_pitch: Some(pitch),
+        level: 0.77,
         ..HIT
     }
 }
@@ -216,6 +230,7 @@ fn shaker(decay_s: f32, cutoff_ratio: f32) -> Instrument {
         brightness: 3.0,
         brightness_decay_s: 0.03,
         fixed_pitch: Some(1000.0),
+        level: 0.90,
         ..HIT
     }
 }
@@ -231,6 +246,7 @@ fn stick(pitch: f32, decay_s: f32) -> Instrument {
         transient: 0.5,
         transient_s: 0.004,
         fixed_pitch: Some(pitch),
+        level: 1.11,
         ..HIT
     }
 }
@@ -244,6 +260,7 @@ fn whistle(decay_s: f32) -> Instrument {
         noise_mix: 0.15,
         vibrato_depth: 0.02,
         fixed_pitch: Some(2300.0),
+        level: 1.66,
         ..HIT
     }
 }
@@ -255,6 +272,7 @@ fn guiro(decay_s: f32) -> Instrument {
         brightness: 3.0,
         brightness_decay_s: 0.15,
         fixed_pitch: Some(700.0),
+        level: 0.73,
         ..HIT
     }
 }
@@ -269,6 +287,7 @@ fn cuica(decay_s: f32, pitch: f32) -> Instrument {
         pitch_drop: -4.0,
         pitch_drop_s: 0.12,
         fixed_pitch: Some(pitch),
+        level: 1.84,
         ..HIT
     }
 }
@@ -283,6 +302,7 @@ fn triangle_bell(decay_s: f32) -> Instrument {
         brightness_decay_s: 0.1,
         transient: 0.45,
         fixed_pitch: Some(3200.0),
+        level: 1.15,
         ..HIT
     }
 }

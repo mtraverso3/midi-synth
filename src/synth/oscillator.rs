@@ -13,11 +13,33 @@ pub enum Waveform {
 
 pub const SQUARE: Waveform = Waveform::Pulse(0.5);
 
+/// The RMS of a saw or triangle at peak 1.0. Every waveform is scaled to match
+/// it, so choosing a shape for a patch changes its colour and not its loudness:
+/// a square carries 1.73x the power of a saw at the same peak.
+const REFERENCE_RMS: f32 = 0.577_350_3;
+
+impl Waveform {
+    fn level(self) -> f32 {
+        match self {
+            Waveform::Sine => REFERENCE_RMS * std::f32::consts::SQRT_2,
+            Waveform::Saw | Waveform::Triangle | Waveform::Noise => 1.0,
+            Waveform::Pulse(duty) => {
+                let duty = duty.clamp(MIN_DUTY, 0.5);
+                REFERENCE_RMS / (duty / (1.0 - duty)).sqrt()
+            }
+        }
+    }
+}
+
+const MIN_DUTY: f32 = 0.05;
+
 pub struct Oscillator {
     sample_rate: f32,
     waveform: Waveform,
     phase: f32,
     phase_step: f32,
+    /// Scaling that keeps every waveform at the same power.
+    level: f32,
     rng: Rng,
 }
 
@@ -28,6 +50,7 @@ impl Oscillator {
             waveform,
             phase: 0.0,
             phase_step: 0.0,
+            level: waveform.level(),
             rng: Rng::new(0x2545_f491),
         }
     }
@@ -38,6 +61,7 @@ impl Oscillator {
 
     pub fn set_waveform(&mut self, waveform: Waveform) {
         self.waveform = waveform;
+        self.level = waveform.level();
     }
 
     pub fn set_phase(&mut self, phase: f32) {
@@ -49,7 +73,7 @@ impl Oscillator {
             Waveform::Sine => (self.phase * std::f32::consts::TAU).sin(),
             Waveform::Saw => 2.0 * self.phase - 1.0 - self.blep(self.phase),
             Waveform::Pulse(duty) => {
-                let duty = duty.clamp(0.05, 0.5);
+                let duty = duty.clamp(MIN_DUTY, 0.5);
                 let raw = if self.phase < duty { 1.0 } else { -1.0 };
                 let edge = self.blep(self.phase) - self.blep((self.phase - duty).rem_euclid(1.0));
                 // Recentre and rescale: a narrow pulse is otherwise offset and hot.
@@ -65,7 +89,7 @@ impl Oscillator {
             Waveform::Noise => self.rng.next_bipolar(),
         };
         self.phase = (self.phase + self.phase_step).fract();
-        value
+        value * self.level
     }
 
     /// PolyBLEP: rounds off the step discontinuity in saw and square waves,

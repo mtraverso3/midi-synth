@@ -66,6 +66,10 @@ Each voice is an [`Instrument`](src/synth/instrument/mod.rs) — a plain paramet
 set describing an oscillator, two envelopes, a filter and its movement, noise
 content, and pitch behaviour.
 
+Waveforms are scaled to equal power, so choosing a shape for a patch changes its
+colour rather than its loudness, and each instrument carries a `level` trim for
+balancing it against the rest of the set.
+
 Instruments are built from a small set of archetypes (`STRUCK`, `PLUCKED`,
 `BOWED`, `BLOWN`, `REED`, `BRASS`, `ORGAN`, `PAD`, `LEAD`, `BELL`, `HIT`), and
 each program overrides only what makes it distinctive:
