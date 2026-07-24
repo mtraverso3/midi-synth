@@ -1,22 +1,38 @@
 use std::path::Path;
 
-use midly::{MetaMessage, MidiMessage, Smf, Timing, TrackEventKind};
+use midly::{Format, MetaMessage, MidiMessage, Smf, Timing, TrackEventKind};
 
+/// Every MIDI 1.0 channel voice message, carried through as the file wrote it.
+/// Interpreting controllers is the synth's job, not the parser's.
 #[derive(Debug, Clone, Copy)]
 pub enum EventKind {
-    NoteOn { note: u8, velocity: u8 },
-    NoteOff { note: u8 },
-    ProgramChange { program: u8 },
-    Sustain { on: bool },
-    Volume { level: u8 },
-    Expression { level: u8 },
-    Pan { position: u8 },
+    NoteOn {
+        note: u8,
+        velocity: u8,
+    },
+    NoteOff {
+        note: u8,
+        velocity: u8,
+    },
+    ProgramChange {
+        program: u8,
+    },
+    Controller {
+        controller: u8,
+        value: u8,
+    },
+    /// Offset from centre, in the raw 14-bit units the wire format uses.
+    PitchBend {
+        offset: i16,
+    },
+    ChannelPressure {
+        pressure: u8,
+    },
+    PolyPressure {
+        note: u8,
+        pressure: u8,
+    },
 }
-
-const CC_VOLUME: u8 = 7;
-const CC_PAN: u8 = 10;
-const CC_EXPRESSION: u8 = 11;
-const CC_SUSTAIN: u8 = 64;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Event {
@@ -40,6 +56,12 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
         Timing::Metrical(_) => return Err("file declares zero ticks per beat".into()),
         Timing::Timecode(_, _) => return Err("SMPTE timecode timing not supported".into()),
     };
+
+    // Format 2 tracks are independent sequences rather than parts of one piece,
+    // so merging them onto a shared timeline would play them stacked.
+    if smf.header.format == Format::Sequential {
+        return Err("format 2 (sequentially independent tracks) not supported".into());
+    }
 
     // Merge all tracks onto one timeline, resolving per-track delta-times into
     // absolute ticks.
@@ -82,33 +104,36 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
         };
         let channel = channel.as_int();
         let kind = match message {
-            MidiMessage::NoteOn { key, vel } if vel.as_int() == 0 => {
-                EventKind::NoteOff { note: key.as_int() }
-            }
+            MidiMessage::NoteOn { key, vel } if vel.as_int() == 0 => EventKind::NoteOff {
+                note: key.as_int(),
+                velocity: 0,
+            },
             MidiMessage::NoteOn { key, vel } => EventKind::NoteOn {
                 note: key.as_int(),
                 velocity: vel.as_int(),
             },
-            MidiMessage::NoteOff { key, .. } => EventKind::NoteOff { note: key.as_int() },
+            MidiMessage::NoteOff { key, vel } => EventKind::NoteOff {
+                note: key.as_int(),
+                velocity: vel.as_int(),
+            },
             MidiMessage::ProgramChange { program } => EventKind::ProgramChange {
                 program: program.as_int(),
             },
-            MidiMessage::Controller { controller, value } => match controller.as_int() {
-                CC_SUSTAIN => EventKind::Sustain {
-                    on: value.as_int() >= 64,
-                },
-                CC_VOLUME => EventKind::Volume {
-                    level: value.as_int(),
-                },
-                CC_EXPRESSION => EventKind::Expression {
-                    level: value.as_int(),
-                },
-                CC_PAN => EventKind::Pan {
-                    position: value.as_int(),
-                },
-                _ => continue,
+            MidiMessage::Controller { controller, value } => EventKind::Controller {
+                controller: controller.as_int(),
+                value: value.as_int(),
             },
-            _ => continue,
+            // midly already reports the bend centred on zero.
+            MidiMessage::PitchBend { bend } => EventKind::PitchBend {
+                offset: bend.as_int(),
+            },
+            MidiMessage::ChannelAftertouch { vel } => EventKind::ChannelPressure {
+                pressure: vel.as_int(),
+            },
+            MidiMessage::Aftertouch { key, vel } => EventKind::PolyPressure {
+                note: key.as_int(),
+                pressure: vel.as_int(),
+            },
         };
         events.push(Event {
             time_s: current_seconds,

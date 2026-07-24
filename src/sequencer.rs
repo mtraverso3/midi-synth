@@ -33,12 +33,17 @@ impl Monitor {
                 self.active[ch] |= 1 << note;
                 self.notes_played += 1;
             }
-            EventKind::NoteOff { note } => self.active[ch] &= !(1 << note),
+            EventKind::NoteOff { note, .. } => self.active[ch] &= !(1 << note),
             EventKind::ProgramChange { program } => self.programs[ch] = program,
-            EventKind::Sustain { .. }
-            | EventKind::Volume { .. }
-            | EventKind::Expression { .. }
-            | EventKind::Pan { .. } => {}
+            EventKind::Controller { controller, .. }
+                if crate::midi::is_channel_mode(controller) =>
+            {
+                self.active[ch] = 0;
+            }
+            EventKind::Controller { .. }
+            | EventKind::PitchBend { .. }
+            | EventKind::ChannelPressure { .. }
+            | EventKind::PolyPressure { .. } => {}
         }
     }
 }
@@ -52,29 +57,32 @@ pub fn to_command(event: &Event) -> Command {
             note,
             velocity,
         },
-        EventKind::NoteOff { note } => Command::NoteOff {
+        EventKind::NoteOff { note, velocity } => Command::NoteOff {
             channel: event.channel,
             note,
+            velocity,
         },
         EventKind::ProgramChange { program } => Command::ProgramChange {
             channel: event.channel,
             program,
         },
-        EventKind::Sustain { on } => Command::Sustain {
+        EventKind::Controller { controller, value } => Command::ControlChange {
             channel: event.channel,
-            on,
+            controller,
+            value,
         },
-        EventKind::Volume { level } => Command::SetVolume {
+        EventKind::PitchBend { offset } => Command::PitchBend {
             channel: event.channel,
-            level,
+            offset,
         },
-        EventKind::Expression { level } => Command::SetExpression {
+        EventKind::ChannelPressure { pressure } => Command::ChannelPressure {
             channel: event.channel,
-            level,
+            pressure,
         },
-        EventKind::Pan { position } => Command::SetPan {
+        EventKind::PolyPressure { note, pressure } => Command::PolyPressure {
             channel: event.channel,
-            position,
+            note,
+            pressure,
         },
     }
 }
@@ -170,14 +178,16 @@ fn seek(
 
     let index = events.partition_point(|e| e.time_s < song_time);
     for event in &events[..index] {
-        if matches!(
-            event.kind,
+        // Replay the state a listener would have arrived with, but not the
+        // one-shot channel mode messages that merely silenced something.
+        let persistent = match event.kind {
             EventKind::ProgramChange { .. }
-                | EventKind::Volume { .. }
-                | EventKind::Expression { .. }
-                | EventKind::Pan { .. }
-                | EventKind::Sustain { .. }
-        ) {
+            | EventKind::PitchBend { .. }
+            | EventKind::ChannelPressure { .. } => true,
+            EventKind::Controller { controller, .. } => crate::midi::is_persistent(controller),
+            _ => false,
+        };
+        if persistent {
             let _ = tx.send(to_command(event));
         }
     }
@@ -197,22 +207,23 @@ fn log_event(event: &Event, now: f64) {
             "[{now:7.3}s] ch{ch:2} NOTE ON   {:<4} (#{note:3})  vel {velocity}",
             note_name(note),
         ),
-        EventKind::NoteOff { note } => println!(
+        EventKind::NoteOff { note, .. } => println!(
             "[{now:7.3}s] ch{ch:2} note off  {:<4} (#{note:3})",
             note_name(note),
         ),
         EventKind::ProgramChange { program } => {
             println!("[{now:7.3}s] ch{ch:2} program   {program}")
         }
-        EventKind::Sustain { on } => println!(
-            "[{now:7.3}s] ch{ch:2} sustain   {}",
-            if on { "on" } else { "off" }
-        ),
-        EventKind::Volume { level } => println!("[{now:7.3}s] ch{ch:2} volume    {level}"),
-        EventKind::Expression { level } => {
-            println!("[{now:7.3}s] ch{ch:2} express   {level}")
+        EventKind::Controller { controller, value } => {
+            println!("[{now:7.3}s] ch{ch:2} cc{controller:<3}     {value}")
         }
-        EventKind::Pan { position } => println!("[{now:7.3}s] ch{ch:2} pan       {position}"),
+        EventKind::PitchBend { offset } => println!("[{now:7.3}s] ch{ch:2} bend      {offset}"),
+        EventKind::ChannelPressure { pressure } => {
+            println!("[{now:7.3}s] ch{ch:2} pressure  {pressure}")
+        }
+        EventKind::PolyPressure { note, pressure } => {
+            println!("[{now:7.3}s] ch{ch:2} poly all  #{note} {pressure}")
+        }
     }
 }
 

@@ -1,3 +1,4 @@
+mod channel;
 mod envelope;
 mod filter;
 mod instrument;
@@ -6,6 +7,7 @@ mod reverb;
 mod rng;
 mod voice;
 
+use channel::{Action, Channel};
 pub use instrument::family_name;
 use reverb::Reverb;
 use voice::Voice;
@@ -14,7 +16,6 @@ use crate::engine::{Command, Engine, write_frame};
 
 const VOICE_COUNT: usize = 8192;
 const CHANNEL_COUNT: usize = 16;
-const CENTRE_PAN: u8 = 64;
 const MASTER_GAIN: f32 = 0.3;
 /// How much reverb is folded back in; enough to place the notes in a room.
 const REVERB_MIX: f32 = 0.22;
@@ -26,12 +27,7 @@ pub struct Synth {
     /// costing anything while the music is sparse.
     sounding: Vec<usize>,
     free: Vec<usize>,
-    programs: [u8; CHANNEL_COUNT],
-    sustain: [bool; CHANNEL_COUNT],
-    volume: [f32; CHANNEL_COUNT],
-    expression: [f32; CHANNEL_COUNT],
-    /// Constant-power left/right gains, precomputed when the pan changes.
-    pan: [(f32, f32); CHANNEL_COUNT],
+    channels: [Channel; CHANNEL_COUNT],
     reverb: Reverb,
 }
 
@@ -43,11 +39,7 @@ impl Synth {
                 .collect(),
             sounding: Vec::with_capacity(VOICE_COUNT),
             free: (0..VOICE_COUNT).rev().collect(),
-            programs: [0; CHANNEL_COUNT],
-            sustain: [false; CHANNEL_COUNT],
-            volume: [1.0; CHANNEL_COUNT],
-            expression: [1.0; CHANNEL_COUNT],
-            pan: [pan_gains(CENTRE_PAN); CHANNEL_COUNT],
+            channels: std::array::from_fn(|_| Channel::default()),
             reverb: Reverb::new(sample_rate),
         }
     }
@@ -85,6 +77,47 @@ impl Synth {
             .map_or(0, |(position, _)| position)
     }
 
+    /// Carry out whatever a controller asked of the sounding voices.
+    fn apply(&mut self, channel: u8, action: Action) {
+        match action {
+            Action::None => {}
+            Action::ModulationChanged => {}
+            Action::PedalReleased => {
+                let state = &self.channels[channel as usize];
+                let held = state.sustain || state.sostenuto;
+                if !held {
+                    for &index in &self.sounding {
+                        let voice = &mut self.voices[index];
+                        if voice.channel() == channel && voice.is_sustained() {
+                            voice.note_off();
+                        }
+                    }
+                }
+            }
+            Action::AllNotesOff => {
+                for &index in &self.sounding {
+                    let voice = &mut self.voices[index];
+                    if voice.channel() == channel {
+                        voice.note_off();
+                    }
+                }
+            }
+            Action::AllSoundOff => {
+                let mut position = 0;
+                while position < self.sounding.len() {
+                    let index = self.sounding[position];
+                    if self.voices[index].channel() == channel {
+                        self.voices[index].kill();
+                        self.sounding.swap_remove(position);
+                        self.free.push(index);
+                    } else {
+                        position += 1;
+                    }
+                }
+            }
+        }
+    }
+
     fn next_frame(&mut self) -> (f32, f32) {
         let mut dry_left = 0.0;
         let mut dry_right = 0.0;
@@ -93,10 +126,10 @@ impl Synth {
             let index = self.sounding[position];
             let voice = &mut self.voices[index];
             if voice.is_active() {
-                let sample = voice.next_sample();
-                let channel = voice.channel() as usize;
-                let level = sample * self.volume[channel] * self.expression[channel];
-                let (left, right) = self.pan[channel];
+                let state = &self.channels[voice.channel() as usize];
+                let sample = voice.next_sample(state.pitch_scale, state.vibrato());
+                let level = sample * state.level();
+                let (left, right) = state.pan;
                 dry_left += level * left;
                 dry_right += level * right;
                 position += 1;
@@ -123,13 +156,15 @@ impl Engine for Synth {
                 note,
                 velocity,
             } => {
-                let program = self.programs[channel as usize];
-                let instrument = instrument::for_note(channel, program, note);
+                let state = &self.channels[channel as usize];
+                let instrument = instrument::for_note(channel, state.program, note);
+                let velocity = (f32::from(velocity) * state.soft) as u8;
                 self.allocate_voice()
                     .note_on(channel, note, velocity, instrument);
             }
-            Command::NoteOff { channel, note } => {
-                let held = self.sustain[channel as usize];
+            Command::NoteOff { channel, note, .. } => {
+                let state = &self.channels[channel as usize];
+                let held = state.sustain || state.sostenuto;
                 for &index in &self.sounding {
                     let voice = &mut self.voices[index];
                     if voice.is_active() && voice.matches(channel, note) {
@@ -142,29 +177,25 @@ impl Engine for Synth {
                 }
             }
             Command::ProgramChange { channel, program } => {
-                self.programs[channel as usize] = program;
+                self.channels[channel as usize].program = program;
             }
-            Command::Sustain { channel, on } => {
-                self.sustain[channel as usize] = on;
-                if !on {
-                    // Pedal up: release every voice it was holding on this channel.
-                    for &index in &self.sounding {
-                        let voice = &mut self.voices[index];
-                        if voice.channel() == channel && voice.is_sustained() {
-                            voice.note_off();
-                        }
-                    }
-                }
+            Command::ControlChange {
+                channel,
+                controller,
+                value,
+            } => {
+                let action = self.channels[channel as usize].control(controller, value);
+                self.apply(channel, action);
             }
-            Command::SetVolume { channel, level } => {
-                self.volume[channel as usize] = f32::from(level) / 127.0;
+            Command::PitchBend { channel, offset } => {
+                self.channels[channel as usize].set_bend(offset);
             }
-            Command::SetExpression { channel, level } => {
-                self.expression[channel as usize] = f32::from(level) / 127.0;
+            Command::ChannelPressure { channel, pressure } => {
+                self.channels[channel as usize].pressure = f32::from(pressure) / 127.0;
             }
-            Command::SetPan { channel, position } => {
-                self.pan[channel as usize] = pan_gains(position);
-            }
+            // Per-note pressure needs per-note modulation, which this synth does
+            // not have; the SoundFont engine honours it.
+            Command::PolyPressure { .. } => {}
             // Intercepted by the pause gate in `engine`.
             Command::SetPaused(_) => {}
             Command::AllNotesOff => {
@@ -182,14 +213,4 @@ impl Engine for Synth {
             write_frame(frame, left, right);
         }
     }
-}
-
-/// Equal-power pan: a centred channel keeps unity gain on both sides, and the
-/// total power stays constant as it moves across the image.
-fn pan_gains(position: u8) -> (f32, f32) {
-    let angle = f32::from(position) / 127.0 * std::f32::consts::FRAC_PI_2;
-    (
-        angle.cos() * std::f32::consts::SQRT_2,
-        angle.sin() * std::f32::consts::SQRT_2,
-    )
 }

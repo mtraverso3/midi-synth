@@ -198,17 +198,21 @@ impl Voice {
         self.sustained = false;
     }
 
-    pub fn next_sample(&mut self) -> f32 {
+    /// `pitch_scale` is the channel's pitch bend, `modulation` the extra vibrato
+    /// its mod wheel and aftertouch are asking for.
+    pub fn next_sample(&mut self, pitch_scale: f32, modulation: f32) -> f32 {
         self.age = self.age.saturating_add(1);
-        let vibrato = if self.vibrato_depth > 0.0 {
+        let depth = self.vibrato_depth + modulation;
+        let vibrato = if depth > 0.0 {
             self.vibrato_age_s += 1.0 / self.sample_rate;
             let onset = (self.vibrato_age_s / VIBRATO_ONSET_S).min(1.0);
-            self.vibrato.next_sample() * self.vibrato_depth * onset
+            self.vibrato.next_sample() * depth * onset
         } else {
             0.0
         };
         self.pitch_offset *= self.pitch_decay;
-        let frequency = self.frequency * (1.0 + vibrato) * semitones(self.pitch_offset);
+        let frequency =
+            self.frequency * (1.0 + vibrato) * semitones(self.pitch_offset) * pitch_scale;
         self.oscillator.set_frequency(frequency);
         self.detuned.set_frequency(frequency * self.detune_ratio);
 

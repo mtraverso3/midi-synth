@@ -5,14 +5,41 @@ use crate::synth::Synth;
 type Error = Box<dyn std::error::Error>;
 
 pub enum Command {
-    NoteOn { channel: u8, note: u8, velocity: u8 },
-    NoteOff { channel: u8, note: u8 },
-    ProgramChange { channel: u8, program: u8 },
-    Sustain { channel: u8, on: bool },
-    SetVolume { channel: u8, level: u8 },
-    SetExpression { channel: u8, level: u8 },
-    SetPan { channel: u8, position: u8 },
+    NoteOn {
+        channel: u8,
+        note: u8,
+        velocity: u8,
+    },
+    NoteOff {
+        channel: u8,
+        note: u8,
+        velocity: u8,
+    },
+    ProgramChange {
+        channel: u8,
+        program: u8,
+    },
+    ControlChange {
+        channel: u8,
+        controller: u8,
+        value: u8,
+    },
+    /// Offset from centre in raw 14-bit units.
+    PitchBend {
+        channel: u8,
+        offset: i16,
+    },
+    ChannelPressure {
+        channel: u8,
+        pressure: u8,
+    },
+    PolyPressure {
+        channel: u8,
+        note: u8,
+        pressure: u8,
+    },
     SetPaused(bool),
+    /// Silence everything on every channel, for seeking.
     AllNotesOff,
 }
 

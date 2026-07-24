@@ -5,13 +5,13 @@ use std::sync::Arc;
 use rustysynth::{Synthesizer, SynthesizerSettings};
 
 use crate::engine::{Command, Engine, write_frame};
+use crate::midi::PITCH_BEND_CENTRE;
 
-const PROGRAM_CHANGE: i32 = 0xC0;
+const POLY_PRESSURE: i32 = 0xA0;
 const CONTROL_CHANGE: i32 = 0xB0;
-const CC_VOLUME: i32 = 7;
-const CC_PAN: i32 = 10;
-const CC_EXPRESSION: i32 = 11;
-const CC_SUSTAIN: i32 = 64;
+const PROGRAM_CHANGE: i32 = 0xC0;
+const CHANNEL_PRESSURE: i32 = 0xD0;
+const PITCH_BEND: i32 = 0xE0;
 
 type Error = Box<dyn std::error::Error>;
 
@@ -56,26 +56,42 @@ impl Engine for SoundFontEngine {
                 velocity,
             } => self
                 .synth
-                .note_on(channel as i32, note as i32, velocity as i32),
-            Command::NoteOff { channel, note } => self.synth.note_off(channel as i32, note as i32),
-            Command::ProgramChange { channel, program } => {
-                self.midi(channel, PROGRAM_CHANGE, program as i32, 0)
+                .note_on(i32::from(channel), i32::from(note), i32::from(velocity)),
+            Command::NoteOff { channel, note, .. } => {
+                self.synth.note_off(i32::from(channel), i32::from(note));
             }
-            Command::Sustain { channel, on } => self.midi(
+            Command::ProgramChange { channel, program } => {
+                self.midi(channel, PROGRAM_CHANGE, i32::from(program), 0);
+            }
+            // rustysynth is a full General MIDI synth, so controllers, bend and
+            // pressure go through untouched rather than being reinterpreted.
+            Command::ControlChange {
+                channel,
+                controller,
+                value,
+            } => self.midi(
                 channel,
                 CONTROL_CHANGE,
-                CC_SUSTAIN,
-                if on { 127 } else { 0 },
+                i32::from(controller),
+                i32::from(value),
             ),
-            Command::SetVolume { channel, level } => {
-                self.midi(channel, CONTROL_CHANGE, CC_VOLUME, level as i32)
+            Command::PitchBend { channel, offset } => {
+                let raw = (offset + PITCH_BEND_CENTRE).clamp(0, 16383);
+                self.midi(
+                    channel,
+                    PITCH_BEND,
+                    i32::from(raw & 0x7f),
+                    i32::from(raw >> 7),
+                );
             }
-            Command::SetExpression { channel, level } => {
-                self.midi(channel, CONTROL_CHANGE, CC_EXPRESSION, level as i32)
+            Command::ChannelPressure { channel, pressure } => {
+                self.midi(channel, CHANNEL_PRESSURE, i32::from(pressure), 0);
             }
-            Command::SetPan { channel, position } => {
-                self.midi(channel, CONTROL_CHANGE, CC_PAN, position as i32)
-            }
+            Command::PolyPressure {
+                channel,
+                note,
+                pressure,
+            } => self.midi(channel, POLY_PRESSURE, i32::from(note), i32::from(pressure)),
             Command::AllNotesOff => self.synth.note_off_all(true),
             // Intercepted by the pause gate in `engine`.
             Command::SetPaused(_) => {}

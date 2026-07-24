@@ -28,8 +28,22 @@ cargo run -- --help
 
 ### Levels
 
-Channel volume (CC7), expression (CC11) and pan (CC10) are followed, so the mix
-keeps the stereo image and dynamics the file asks for.
+Notes, program changes, pitch bend (with its RPN 0 range), channel pressure and
+the controllers below are followed; the parser hands every channel voice message
+to the engine, so a SoundFont receives even the ones the built-in synth ignores.
+
+| | |
+|---|---|
+| CC1 | modulation |
+| CC7 / CC11 | volume, expression |
+| CC10 | pan |
+| CC64 / CC66 / CC67 | sustain, sostenuto, soft pedal |
+| CC0 / CC32 | bank select |
+| CC6 / CC38 / CC96 / CC97 | data entry, for RPN 0 |
+| CC120-127 | channel mode: all sound off, all notes off, reset controllers |
+
+SMF formats 0 and 1 are supported. Format 2 and SMPTE timecode division are
+rejected with an error rather than played incorrectly.
 
 The master bus ends in a look-ahead limiter, so polyphony sets the density of
 the music rather than its volume: a dense passage is turned down as a whole
