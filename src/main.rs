@@ -4,9 +4,11 @@ mod output;
 mod render;
 mod sequencer;
 mod synth;
+mod tui;
 
 use std::path::PathBuf;
-use std::thread::sleep;
+use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::Duration;
 
 use clap::Parser;
@@ -23,12 +25,17 @@ struct Cli {
     #[arg(short, long)]
     verbose: bool,
 
+    /// Show a live terminal visualizer while playing.
+    #[arg(long)]
+    tui: bool,
+
     /// Render to an audio file (.wav or .mp3) instead of playing live.
     #[arg(short, long)]
     output: Option<PathBuf>,
 }
 
 const SAMPLE_RATE: u32 = 44_100;
+const TAIL_SECONDS: f64 = 2.0;
 
 fn main() {
     let cli = Cli::parse();
@@ -40,9 +47,9 @@ fn main() {
             std::process::exit(1);
         }
     };
-    println!("Loaded {} events from {}", events.len(), cli.file.display());
 
     if let Some(path) = cli.output {
+        println!("Loaded {} events from {}", events.len(), cli.file.display());
         println!("Rendering to {}...", path.display());
         let samples = render::render(&events, SAMPLE_RATE);
         if let Err(e) = output::write(&path, &samples, SAMPLE_RATE) {
@@ -53,10 +60,33 @@ fn main() {
         return;
     }
 
+    if cli.tui {
+        play_with_tui(events);
+        return;
+    }
+
+    println!("Loaded {} events from {}", events.len(), cli.file.display());
     let (_stream, tx) = audio::build_stream();
     println!("Playing...");
-    sequencer::play(&events, &tx, cli.verbose);
+    sequencer::play(&events, &tx, cli.verbose, None);
 
-    sleep(Duration::from_millis(500));
+    thread::sleep(Duration::from_millis(500));
     println!("Done.");
+}
+
+fn play_with_tui(events: Vec<midi::Event>) {
+    let total_s = events.last().map(|e| e.time_s).unwrap_or(0.0) + TAIL_SECONDS;
+    let monitor = Arc::new(Mutex::new(sequencer::Monitor::default()));
+
+    let (_stream, tx) = audio::build_stream();
+
+    let player_monitor = monitor.clone();
+    let player = thread::spawn(move || {
+        sequencer::play(&events, &tx, false, Some(&player_monitor));
+    });
+
+    if let Err(e) = tui::run(&monitor, total_s) {
+        eprintln!("tui error: {e}");
+    }
+    let _ = player.join();
 }

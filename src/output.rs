@@ -44,8 +44,7 @@ fn write_mp3(path: &Path, samples: &[f32], sample_rate: u32) -> Result<(), Error
     let mut encoder = builder.build().map_err(|e| e.to_string())?;
 
     let pcm = to_i16(samples);
-    let mut mp3 = Vec::new();
-    mp3.reserve(mp3lame_encoder::max_required_buffer_size(pcm.len()));
+    let mut mp3 = Vec::with_capacity(mp3lame_encoder::max_required_buffer_size(pcm.len()));
 
     let encoded = encoder
         .encode(MonoPcm(&pcm), mp3.spare_capacity_mut())

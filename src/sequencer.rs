@@ -1,14 +1,32 @@
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use crate::midi::{Event, EventKind};
 use crate::synth::SynthCommand;
 
+/// Live snapshot of what's playing, shared with the TUI. `active[ch]` is a
+/// bitmask of sounding notes on that channel; `seen` marks channels that have
+/// ever played so the UI only shows those.
+#[derive(Default, Clone, Copy)]
+pub struct Monitor {
+    pub active: [u128; 16],
+    pub seen: u16,
+    pub finished: bool,
+}
+
+pub type SharedMonitor = Arc<Mutex<Monitor>>;
+
 /// Plays events through `tx`, sleeping until each one's absolute timestamp so
 /// scheduling error can't accumulate over the song. Assumes `events` is sorted
-/// by `time_s`.
-pub fn play(events: &[Event], tx: &Sender<SynthCommand>, verbose: bool) {
+/// by `time_s`. Updates `monitor` (if given) as notes start and stop.
+pub fn play(
+    events: &[Event],
+    tx: &Sender<SynthCommand>,
+    verbose: bool,
+    monitor: Option<&SharedMonitor>,
+) {
     let start = Instant::now();
 
     for event in events {
@@ -21,10 +39,28 @@ pub fn play(events: &[Event], tx: &Sender<SynthCommand>, verbose: bool) {
         if verbose {
             log_event(event, start.elapsed().as_secs_f64());
         }
+        if let Some(monitor) = monitor {
+            update_monitor(monitor, event);
+        }
 
         if tx.send(to_command(event)).is_err() {
-            return;
+            break;
         }
+    }
+
+    if let Some(monitor) = monitor {
+        monitor.lock().unwrap().finished = true;
+    }
+}
+
+fn update_monitor(monitor: &SharedMonitor, event: &Event) {
+    let mut m = monitor.lock().unwrap();
+    let ch = event.channel as usize;
+    m.seen |= 1 << ch;
+    match event.kind {
+        EventKind::NoteOn { note, .. } => m.active[ch] |= 1 << note,
+        EventKind::NoteOff { note } => m.active[ch] &= !(1 << note),
+        EventKind::ProgramChange { .. } => {}
     }
 }
 

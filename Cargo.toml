@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 clap = { version = "4.6.4", features = ["derive"] }
 cpal = "0.18.1"
+crossterm = "0.29.0"
 hound = "3.5.1"
 midly = "0.5.3"
 mp3lame-encoder = "0.2.4"
+ratatui = "0.30.2"
