@@ -35,6 +35,28 @@ const SUSTAINED: fn(Waveform) -> Instrument = |waveform| Instrument {
     cutoff_hz: 3500.0,
 };
 
+/// Short General MIDI family label for a channel, for display.
+pub fn family_name(channel: u8, program: u8) -> &'static str {
+    if channel == DRUM_CHANNEL {
+        return "Drums";
+    }
+    match program {
+        0..=7 => "Piano",
+        8..=15 => "Chroma",
+        16..=23 => "Organ",
+        24..=31 => "Guitar",
+        32..=39 => "Bass",
+        40..=47 => "Strings",
+        48..=55 => "Ensemble",
+        56..=63 => "Brass",
+        64..=71 => "Reed",
+        72..=79 => "Pipe",
+        80..=87 => "Lead",
+        88..=95 => "Pad",
+        _ => "Synth",
+    }
+}
+
 /// Pick an instrument for a channel from its General MIDI program number,
 /// grouping programs into families that share a timbre and amplitude shape.
 pub fn for_channel(channel: u8, program: u8) -> Instrument {

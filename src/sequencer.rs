@@ -12,7 +12,9 @@ use crate::synth::SynthCommand;
 #[derive(Default, Clone, Copy)]
 pub struct Monitor {
     pub active: [u128; 16],
+    pub programs: [u8; 16],
     pub seen: u16,
+    pub notes_played: u64,
     pub finished: bool,
 }
 
@@ -58,9 +60,12 @@ fn update_monitor(monitor: &SharedMonitor, event: &Event) {
     let ch = event.channel as usize;
     m.seen |= 1 << ch;
     match event.kind {
-        EventKind::NoteOn { note, .. } => m.active[ch] |= 1 << note,
+        EventKind::NoteOn { note, .. } => {
+            m.active[ch] |= 1 << note;
+            m.notes_played += 1;
+        }
         EventKind::NoteOff { note } => m.active[ch] &= !(1 << note),
-        EventKind::ProgramChange { .. } => {}
+        EventKind::ProgramChange { program } => m.programs[ch] = program,
     }
 }
 

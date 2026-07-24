@@ -4,6 +4,7 @@ mod instrument;
 mod oscillator;
 mod voice;
 
+pub use instrument::family_name;
 use voice::Voice;
 
 const VOICE_COUNT: usize = 64;

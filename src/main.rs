@@ -61,7 +61,8 @@ fn main() {
     }
 
     if cli.tui {
-        play_with_tui(events);
+        let title = cli.file.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        play_with_tui(events, title.to_string());
         return;
     }
 
@@ -74,7 +75,7 @@ fn main() {
     println!("Done.");
 }
 
-fn play_with_tui(events: Vec<midi::Event>) {
+fn play_with_tui(events: Vec<midi::Event>, title: String) {
     let total_s = events.last().map(|e| e.time_s).unwrap_or(0.0) + TAIL_SECONDS;
     let monitor = Arc::new(Mutex::new(sequencer::Monitor::default()));
 
@@ -85,7 +86,7 @@ fn play_with_tui(events: Vec<midi::Event>) {
         sequencer::play(&events, &tx, false, Some(&player_monitor));
     });
 
-    if let Err(e) = tui::run(&monitor, total_s) {
+    if let Err(e) = tui::run(&monitor, &title, total_s) {
         eprintln!("tui error: {e}");
     }
     let _ = player.join();
