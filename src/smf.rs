@@ -9,9 +9,13 @@ pub enum EventKind {
     ProgramChange { program: u8 },
     Sustain { on: bool },
     Volume { level: u8 },
+    Expression { level: u8 },
+    Pan { position: u8 },
 }
 
 const CC_VOLUME: u8 = 7;
+const CC_PAN: u8 = 10;
+const CC_EXPRESSION: u8 = 11;
 const CC_SUSTAIN: u8 = 64;
 
 #[derive(Debug, Clone, Copy)]
@@ -32,7 +36,8 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
     let smf = Smf::parse(bytes)?;
 
     let ticks_per_beat = match smf.header.timing {
-        Timing::Metrical(t) => t.as_int() as f64,
+        Timing::Metrical(t) if t.as_int() > 0 => f64::from(t.as_int()),
+        Timing::Metrical(_) => return Err("file declares zero ticks per beat".into()),
         Timing::Timecode(_, _) => return Err("SMPTE timecode timing not supported".into()),
     };
 
@@ -94,6 +99,12 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
                 },
                 CC_VOLUME => EventKind::Volume {
                     level: value.as_int(),
+                },
+                CC_EXPRESSION => EventKind::Expression {
+                    level: value.as_int(),
+                },
+                CC_PAN => EventKind::Pan {
+                    position: value.as_int(),
                 },
                 _ => continue,
             },

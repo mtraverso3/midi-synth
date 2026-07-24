@@ -4,7 +4,8 @@ A MIDI file player with a built-in software synthesizer.
 It parses a `.mid` file, synthesizes the notes from scratch
 (anti-aliased oscillators, ADSR amplitude and filter envelopes, a resonant
 low-pass filter, and a reverb), and plays them out loud or writes them to an
-audio file. Optionally plays through a SoundFont (`.sf2`) for sampled instruments.
+audio file in stereo. Optionally plays through a SoundFont (`.sf2`) for sampled
+instruments.
 
 ## Requirements
 
@@ -26,6 +27,9 @@ cargo run -- --help
 ```
 
 ### Levels
+
+Channel volume (CC7), expression (CC11) and pan (CC10) are followed, so the mix
+keeps the stereo image and dynamics the file asks for.
 
 The master bus ends in a look-ahead limiter, so polyphony sets the density of
 the music rather than its volume: a dense passage is turned down as a whole

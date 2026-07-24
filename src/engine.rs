@@ -10,6 +10,8 @@ pub enum Command {
     ProgramChange { channel: u8, program: u8 },
     Sustain { channel: u8, on: bool },
     SetVolume { channel: u8, level: u8 },
+    SetExpression { channel: u8, level: u8 },
+    SetPan { channel: u8, position: u8 },
     SetPaused(bool),
     AllNotesOff,
 }

@@ -9,6 +9,8 @@ use crate::engine::{Command, Engine, write_frame};
 const PROGRAM_CHANGE: i32 = 0xC0;
 const CONTROL_CHANGE: i32 = 0xB0;
 const CC_VOLUME: i32 = 7;
+const CC_PAN: i32 = 10;
+const CC_EXPRESSION: i32 = 11;
 const CC_SUSTAIN: i32 = 64;
 
 type Error = Box<dyn std::error::Error>;
@@ -67,6 +69,12 @@ impl Engine for SoundFontEngine {
             ),
             Command::SetVolume { channel, level } => {
                 self.midi(channel, CONTROL_CHANGE, CC_VOLUME, level as i32)
+            }
+            Command::SetExpression { channel, level } => {
+                self.midi(channel, CONTROL_CHANGE, CC_EXPRESSION, level as i32)
+            }
+            Command::SetPan { channel, position } => {
+                self.midi(channel, CONTROL_CHANGE, CC_PAN, position as i32)
             }
             Command::AllNotesOff => self.synth.note_off_all(true),
             // Intercepted by the pause gate in `engine`.

@@ -35,7 +35,10 @@ impl Monitor {
             }
             EventKind::NoteOff { note } => self.active[ch] &= !(1 << note),
             EventKind::ProgramChange { program } => self.programs[ch] = program,
-            EventKind::Sustain { .. } | EventKind::Volume { .. } => {}
+            EventKind::Sustain { .. }
+            | EventKind::Volume { .. }
+            | EventKind::Expression { .. }
+            | EventKind::Pan { .. } => {}
         }
     }
 }
@@ -64,6 +67,14 @@ pub fn to_command(event: &Event) -> Command {
         EventKind::Volume { level } => Command::SetVolume {
             channel: event.channel,
             level,
+        },
+        EventKind::Expression { level } => Command::SetExpression {
+            channel: event.channel,
+            level,
+        },
+        EventKind::Pan { position } => Command::SetPan {
+            channel: event.channel,
+            position,
         },
     }
 }
@@ -161,7 +172,11 @@ fn seek(
     for event in &events[..index] {
         if matches!(
             event.kind,
-            EventKind::ProgramChange { .. } | EventKind::Volume { .. } | EventKind::Sustain { .. }
+            EventKind::ProgramChange { .. }
+                | EventKind::Volume { .. }
+                | EventKind::Expression { .. }
+                | EventKind::Pan { .. }
+                | EventKind::Sustain { .. }
         ) {
             let _ = tx.send(to_command(event));
         }
@@ -194,6 +209,10 @@ fn log_event(event: &Event, now: f64) {
             if on { "on" } else { "off" }
         ),
         EventKind::Volume { level } => println!("[{now:7.3}s] ch{ch:2} volume    {level}"),
+        EventKind::Expression { level } => {
+            println!("[{now:7.3}s] ch{ch:2} express   {level}")
+        }
+        EventKind::Pan { position } => println!("[{now:7.3}s] ch{ch:2} pan       {position}"),
     }
 }
 
