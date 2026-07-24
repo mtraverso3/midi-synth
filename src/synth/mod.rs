@@ -7,7 +7,7 @@ mod voice;
 pub use instrument::family_name;
 use voice::Voice;
 
-const VOICE_COUNT: usize = 64;
+const VOICE_COUNT: usize = 256;
 const CHANNEL_COUNT: usize = 16;
 const MASTER_GAIN: f32 = 0.3;
 
