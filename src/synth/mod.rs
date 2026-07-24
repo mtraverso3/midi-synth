@@ -2,6 +2,7 @@ mod envelope;
 mod filter;
 mod instrument;
 mod oscillator;
+mod rng;
 mod voice;
 
 pub use instrument::family_name;
@@ -23,7 +24,9 @@ pub struct Synth {
 impl Synth {
     pub fn new(sample_rate: f32) -> Self {
         Self {
-            voices: (0..VOICE_COUNT).map(|_| Voice::new(sample_rate)).collect(),
+            voices: (0..VOICE_COUNT)
+                .map(|i| Voice::new(sample_rate, 0x9e37_79b9u32.wrapping_mul(i as u32 + 1)))
+                .collect(),
             programs: [0; CHANNEL_COUNT],
             sustain: [false; CHANNEL_COUNT],
             volume: [1.0; CHANNEL_COUNT],
