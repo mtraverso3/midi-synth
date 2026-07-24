@@ -161,6 +161,7 @@ impl Voice {
         let velocity_brightness = 0.4 + 0.6 * velocity;
         self.cutoff_hz = self.frequency * instrument.cutoff_ratio;
         self.cutoff_range_hz = self.cutoff_hz * instrument.brightness * velocity_brightness;
+        self.filter.set_resonance(instrument.resonance);
         self.filter.reset();
 
         self.noise_mix = instrument.noise_mix;

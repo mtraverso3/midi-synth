@@ -13,6 +13,10 @@ pub mod cc {
     pub const BANK_LSB: u8 = 32;
     pub const DATA_ENTRY_LSB: u8 = 38;
     pub const SUSTAIN: u8 = 64;
+    pub const RESONANCE: u8 = 71;
+    pub const RELEASE_TIME: u8 = 72;
+    pub const ATTACK_TIME: u8 = 73;
+    pub const BRIGHTNESS: u8 = 74;
     pub const SOSTENUTO: u8 = 66;
     pub const SOFT: u8 = 67;
     pub const DATA_INCREMENT: u8 = 96;
@@ -55,4 +59,28 @@ pub fn is_channel_mode(controller: u8) -> bool {
 /// One-shot messages (the channel mode group) must not be.
 pub fn is_persistent(controller: u8) -> bool {
     !is_channel_mode(controller)
+}
+
+/// The universal system exclusive messages worth acting on. Everything else is
+/// device-specific and safely ignored.
+pub enum SystemExclusive {
+    /// Universal master volume, 14-bit.
+    MasterVolume(u16),
+    /// "GM System On": reset every channel to General MIDI defaults.
+    GeneralMidiReset,
+}
+
+/// Recognise a SysEx payload. `data` excludes the leading 0xF0 but may include
+/// the trailing 0xF7, as midly reports it.
+pub fn parse_system_exclusive(data: &[u8]) -> Option<SystemExclusive> {
+    let data = data.strip_suffix(&[0xF7]).unwrap_or(data);
+    match data {
+        // F0 7F <device> 04 01 <lsb> <msb> F7
+        [0x7F, _, 0x04, 0x01, lsb, msb] => Some(SystemExclusive::MasterVolume(
+            u16::from(*msb) << 7 | u16::from(*lsb),
+        )),
+        // F0 7E <device> 09 01 F7
+        [0x7E, _, 0x09, 0x01] => Some(SystemExclusive::GeneralMidiReset),
+        _ => None,
+    }
 }

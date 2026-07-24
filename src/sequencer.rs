@@ -40,7 +40,11 @@ impl Monitor {
             {
                 self.active[ch] = 0;
             }
+            EventKind::GeneralMidiReset => {
+                self.active[ch] = 0;
+            }
             EventKind::Controller { .. }
+            | EventKind::MasterVolume { .. }
             | EventKind::PitchBend { .. }
             | EventKind::ChannelPressure { .. }
             | EventKind::PolyPressure { .. } => {}
@@ -84,6 +88,8 @@ pub fn to_command(event: &Event) -> Command {
             note,
             pressure,
         },
+        EventKind::MasterVolume { level } => Command::SetMasterVolume(f32::from(level) / 16383.0),
+        EventKind::GeneralMidiReset => Command::Reset,
     }
 }
 
@@ -185,6 +191,7 @@ fn seek(
             | EventKind::PitchBend { .. }
             | EventKind::ChannelPressure { .. } => true,
             EventKind::Controller { controller, .. } => crate::midi::is_persistent(controller),
+            EventKind::MasterVolume { .. } => true,
             _ => false,
         };
         if persistent {
@@ -224,6 +231,8 @@ fn log_event(event: &Event, now: f64) {
         EventKind::PolyPressure { note, pressure } => {
             println!("[{now:7.3}s] ch{ch:2} poly all  #{note} {pressure}")
         }
+        EventKind::MasterVolume { level } => println!("[{now:7.3}s] sysex master volume {level}"),
+        EventKind::GeneralMidiReset => println!("[{now:7.3}s] sysex GM reset"),
     }
 }
 

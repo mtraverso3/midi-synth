@@ -38,6 +38,10 @@ pub enum Command {
         note: u8,
         pressure: u8,
     },
+    /// Universal master volume, 0.0..=1.0.
+    SetMasterVolume(f32),
+    /// Reset every channel to General MIDI defaults.
+    Reset,
     SetPaused(bool),
     /// Silence everything on every channel, for seeking.
     AllNotesOff,

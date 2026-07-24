@@ -32,6 +32,11 @@ pub enum EventKind {
         note: u8,
         pressure: u8,
     },
+    /// Universal system exclusive; applies to the whole instrument, not a channel.
+    MasterVolume {
+        level: u16,
+    },
+    GeneralMidiReset,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -137,6 +142,22 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
 
         if let TrackEventKind::Meta(MetaMessage::Tempo(t)) = kind {
             clock.set_tempo(f64::from(t.as_int()));
+            continue;
+        }
+
+        if let TrackEventKind::SysEx(data) = kind {
+            let kind = match crate::midi::parse_system_exclusive(data) {
+                Some(crate::midi::SystemExclusive::MasterVolume(level)) => {
+                    EventKind::MasterVolume { level }
+                }
+                Some(crate::midi::SystemExclusive::GeneralMidiReset) => EventKind::GeneralMidiReset,
+                None => continue,
+            };
+            events.push(Event {
+                time_s: current_seconds,
+                channel: 0,
+                kind,
+            });
             continue;
         }
 

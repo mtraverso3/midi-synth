@@ -20,6 +20,11 @@ pub struct Channel {
     pub soft: f32,
     pub modulation: f32,
     pub pressure: f32,
+    /// Sound controllers 71-74, each a multiplier centred on 1.0 at value 64.
+    pub resonance: f32,
+    pub release_scale: f32,
+    pub attack_scale: f32,
+    pub brightness_scale: f32,
     /// Bend in semitones, and the multiplier it works out to.
     pub bend_semitones: f32,
     pub bend_range: f32,
@@ -55,6 +60,10 @@ impl Default for Channel {
             soft: 1.0,
             modulation: 0.0,
             pressure: 0.0,
+            resonance: 1.0,
+            release_scale: 1.0,
+            attack_scale: 1.0,
+            brightness_scale: 1.0,
             bend_semitones: 0.0,
             bend_range: DEFAULT_BEND_SEMITONES,
             pitch_scale: 1.0,
@@ -81,6 +90,11 @@ impl Channel {
                 return Action::ModulationChanged;
             }
             cc::SOFT => self.soft = 1.0 - unit * (1.0 - SOFT_PEDAL),
+            // Sound controllers are relative, with 64 meaning "as the patch is".
+            cc::RESONANCE => self.resonance = centred(value, 2.0),
+            cc::RELEASE_TIME => self.release_scale = centred(value, 4.0),
+            cc::ATTACK_TIME => self.attack_scale = centred(value, 4.0),
+            cc::BRIGHTNESS => self.brightness_scale = centred(value, 4.0),
             cc::SUSTAIN => {
                 let down = value >= PEDAL_THRESHOLD;
                 let released = self.sustain && !down;
@@ -135,6 +149,10 @@ impl Channel {
                 self.sustain = false;
                 self.sostenuto = false;
                 self.soft = 1.0;
+                self.resonance = 1.0;
+                self.release_scale = 1.0;
+                self.attack_scale = 1.0;
+                self.brightness_scale = 1.0;
                 self.bend_semitones = 0.0;
                 self.pitch_scale = 1.0;
                 self.parameter = None;
@@ -180,4 +198,11 @@ pub fn pan_gains(position: u8) -> (f32, f32) {
         angle.cos() * std::f32::consts::SQRT_2,
         angle.sin() * std::f32::consts::SQRT_2,
     )
+}
+
+/// A sound controller reading, as a multiplier: 0 gives `1/range`, 64 gives 1.0
+/// and 127 gives `range`.
+fn centred(value: u8, range: f32) -> f32 {
+    let offset = (f32::from(value) - 64.0) / 63.0;
+    range.powf(offset)
 }

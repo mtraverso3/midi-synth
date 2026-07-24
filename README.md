@@ -40,9 +40,15 @@ to the engine, so a SoundFont receives even the ones the built-in synth ignores.
 | CC64 / CC66 / CC67 | sustain, sostenuto, soft pedal |
 | CC0 / CC32 | bank select |
 | CC6 / CC38 / CC96 / CC97 | data entry, for RPN 0 |
+| CC71-74 | resonance, release, attack, brightness |
 | CC120-127 | channel mode: all sound off, all notes off, reset controllers |
 
+Universal system exclusive master volume and "GM System On" are acted on; other
+system exclusive messages are device-specific and ignored.
+
 Polyphonic key pressure leans on the vibrato of the single note it names.
+Velocity sets attenuation by the square law the SoundFont and DLS specs use, so
+a part written quiet stays quiet against the rest of the mix.
 
 SMF formats 0 and 1 are supported, with either metrical or SMPTE timecode
 division. Format 2 holds independent sequences rather than one piece, so it is

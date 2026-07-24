@@ -36,6 +36,8 @@ pub struct Instrument {
     pub pitch_drop_s: f32,
     /// Pitch in Hz for voices where the note picks the sound, not the pitch.
     pub fixed_pitch: Option<f32>,
+    /// Filter resonance, relative to the patch's own. Sound controller 71 moves it.
+    pub resonance: f32,
 }
 
 pub const FOREVER: f32 = 1.0e9;
@@ -57,6 +59,7 @@ const BASE: Instrument = Instrument {
     pitch_drop: 0.0,
     pitch_drop_s: 0.02,
     fixed_pitch: None,
+    resonance: 1.0,
 };
 
 /// Hammered or mallet-struck: instant onset, then a long ring down to silence.

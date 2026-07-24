@@ -23,6 +23,11 @@ impl LowPass {
         filter
     }
 
+    /// Scale the resonance relative to the filter's natural Q.
+    pub fn set_resonance(&mut self, scale: f32) {
+        self.k = 1.0 / (RESONANCE * scale).clamp(0.3, 8.0);
+    }
+
     pub fn reset(&mut self) {
         self.ic1 = 0.0;
         self.ic2 = 0.0;

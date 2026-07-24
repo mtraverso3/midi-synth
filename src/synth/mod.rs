@@ -30,6 +30,7 @@ pub struct Synth {
     sounding: Vec<usize>,
     free: Vec<usize>,
     channels: [Channel; CHANNEL_COUNT],
+    master_volume: f32,
     reverb: Reverb,
 }
 
@@ -42,6 +43,7 @@ impl Synth {
             sounding: Vec::with_capacity(VOICE_COUNT),
             free: (0..VOICE_COUNT).rev().collect(),
             channels: std::array::from_fn(|_| Channel::default()),
+            master_volume: 1.0,
             reverb: Reverb::new(sample_rate),
         }
     }
@@ -140,8 +142,9 @@ impl Synth {
                 self.free.push(index);
             }
         }
-        let dry_left = dry_left * MASTER_GAIN;
-        let dry_right = dry_right * MASTER_GAIN;
+        let gain = MASTER_GAIN * self.master_volume;
+        let dry_left = dry_left * gain;
+        let dry_right = dry_right * gain;
         let (wet_left, wet_right) = self.reverb.process((dry_left + dry_right) * 0.5);
         (
             dry_left + wet_left * REVERB_MIX,
@@ -159,7 +162,11 @@ impl Engine for Synth {
                 velocity,
             } => {
                 let state = &self.channels[channel as usize];
-                let instrument = instrument::for_note(channel, state.program, note);
+                let mut instrument = instrument::for_note(channel, state.program, note);
+                instrument.attack_s *= state.attack_scale;
+                instrument.release_s *= state.release_scale;
+                instrument.brightness *= state.brightness_scale;
+                instrument.resonance = state.resonance;
                 let velocity = (f32::from(velocity) * state.soft) as u8;
                 self.allocate_voice()
                     .note_on(channel, note, velocity, instrument);
@@ -206,6 +213,15 @@ impl Engine for Synth {
                     if voice.is_active() && voice.matches(channel, note) {
                         voice.set_pressure(depth);
                     }
+                }
+            }
+            Command::SetMasterVolume(level) => self.master_volume = level,
+            Command::Reset => {
+                self.channels = std::array::from_fn(|_| Channel::default());
+                self.master_volume = 1.0;
+                while let Some(index) = self.sounding.pop() {
+                    self.voices[index].kill();
+                    self.free.push(index);
                 }
             }
             // Intercepted by the pause gate in `engine`.

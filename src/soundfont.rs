@@ -92,6 +92,8 @@ impl Engine for SoundFontEngine {
                 note,
                 pressure,
             } => self.midi(channel, POLY_PRESSURE, i32::from(note), i32::from(pressure)),
+            Command::SetMasterVolume(level) => self.synth.set_master_volume(level),
+            Command::Reset => self.synth.reset(),
             Command::AllNotesOff => self.synth.note_off_all(true),
             // Intercepted by the pause gate in `engine`.
             Command::SetPaused(_) => {}
