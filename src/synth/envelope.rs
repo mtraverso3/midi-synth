@@ -8,6 +8,7 @@ enum Stage {
 }
 
 pub struct Envelope {
+    sample_rate: f32,
     stage: Stage,
     level: f32,
     attack_rate: f32,
@@ -17,29 +18,30 @@ pub struct Envelope {
 }
 
 impl Envelope {
-    pub fn new(
-        sample_rate: f32,
-        attack_s: f32,
-        decay_s: f32,
-        sustain_level: f32,
-        release_s: f32,
-    ) -> Self {
+    pub fn new(sample_rate: f32) -> Self {
+        Self {
+            sample_rate,
+            stage: Stage::Idle,
+            level: 0.0,
+            attack_rate: 1.0,
+            decay_rate: 1.0,
+            sustain_level: 1.0,
+            release_rate: 1.0,
+        }
+    }
+
+    pub fn configure(&mut self, attack_s: f32, decay_s: f32, sustain_level: f32, release_s: f32) {
         let per_sample = |seconds: f32| {
             if seconds <= 0.0 {
                 1.0
             } else {
-                1.0 / (seconds * sample_rate)
+                1.0 / (seconds * self.sample_rate)
             }
         };
-
-        Self {
-            stage: Stage::Idle,
-            level: 0.0,
-            attack_rate: per_sample(attack_s),
-            decay_rate: per_sample(decay_s),
-            sustain_level,
-            release_rate: per_sample(release_s),
-        }
+        self.attack_rate = per_sample(attack_s);
+        self.decay_rate = per_sample(decay_s);
+        self.sustain_level = sustain_level;
+        self.release_rate = per_sample(release_s);
     }
 
     pub fn trigger(&mut self) {

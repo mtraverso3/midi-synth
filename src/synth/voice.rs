@@ -1,4 +1,5 @@
 use super::envelope::Envelope;
+use super::instrument::Instrument;
 use super::oscillator::{Oscillator, Waveform};
 
 pub struct Voice {
@@ -12,8 +13,8 @@ pub struct Voice {
 impl Voice {
     pub fn new(sample_rate: f32) -> Self {
         Self {
-            oscillator: Oscillator::new(sample_rate, Waveform::Saw),
-            envelope: Envelope::new(sample_rate, 0.01, 0.1, 0.7, 0.2),
+            oscillator: Oscillator::new(sample_rate, Waveform::Triangle),
+            envelope: Envelope::new(sample_rate),
             channel: 0,
             note: None,
             amplitude: 0.0,
@@ -28,12 +29,18 @@ impl Voice {
         self.note == Some(note) && self.channel == channel
     }
 
-    pub fn note_on(&mut self, channel: u8, note: u8, velocity: u8, waveform: Waveform) {
+    pub fn note_on(&mut self, channel: u8, note: u8, velocity: u8, instrument: Instrument) {
         self.channel = channel;
         self.note = Some(note);
         self.amplitude = velocity as f32 / 127.0;
-        self.oscillator.set_waveform(waveform);
+        self.oscillator.set_waveform(instrument.waveform);
         self.oscillator.set_frequency(note_to_freq(note));
+        self.envelope.configure(
+            instrument.attack_s,
+            instrument.decay_s,
+            instrument.sustain_level,
+            instrument.release_s,
+        );
         self.envelope.trigger();
     }
 

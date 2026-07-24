@@ -36,8 +36,8 @@ impl Synth {
                 velocity,
             } => {
                 let program = self.programs[channel as usize];
-                let waveform = instrument::waveform_for(channel, program);
-                self.allocate_voice().note_on(channel, note, velocity, waveform);
+                let instrument = instrument::for_channel(channel, program);
+                self.allocate_voice().note_on(channel, note, velocity, instrument);
             }
             SynthCommand::NoteOff { channel, note } => {
                 for voice in &mut self.voices {
