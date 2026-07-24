@@ -1,4 +1,5 @@
 use super::envelope::Envelope;
+use super::filter::LowPass;
 use super::instrument::Instrument;
 use super::oscillator::{Oscillator, Waveform};
 
@@ -8,9 +9,11 @@ use super::oscillator::{Oscillator, Waveform};
 const DETUNE: f32 = 1.006;
 
 pub struct Voice {
+    sample_rate: f32,
     oscillator: Oscillator,
     detuned: Oscillator,
     envelope: Envelope,
+    filter: LowPass,
     channel: u8,
     note: Option<u8>,
     amplitude: f32,
@@ -19,9 +22,11 @@ pub struct Voice {
 impl Voice {
     pub fn new(sample_rate: f32) -> Self {
         Self {
+            sample_rate,
             oscillator: Oscillator::new(sample_rate, Waveform::Triangle),
             detuned: Oscillator::new(sample_rate, Waveform::Triangle),
             envelope: Envelope::new(sample_rate),
+            filter: LowPass::new(),
             channel: 0,
             note: None,
             amplitude: 0.0,
@@ -52,6 +57,7 @@ impl Voice {
         self.oscillator.set_frequency(freq);
         self.detuned.set_waveform(instrument.waveform);
         self.detuned.set_frequency(freq * DETUNE);
+        self.filter.set_cutoff(self.sample_rate, instrument.cutoff_hz);
 
         self.envelope.configure(
             instrument.attack_s,
@@ -68,7 +74,8 @@ impl Voice {
 
     pub fn next_sample(&mut self) -> f32 {
         let osc = (self.oscillator.next_sample() + self.detuned.next_sample()) * 0.5;
-        osc * self.envelope.next_sample() * self.amplitude
+        let filtered = self.filter.process(osc);
+        filtered * self.envelope.next_sample() * self.amplitude
     }
 }
 

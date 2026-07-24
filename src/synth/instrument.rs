@@ -12,6 +12,7 @@ pub struct Instrument {
     pub decay_s: f32,
     pub sustain_level: f32,
     pub release_s: f32,
+    pub cutoff_hz: f32,
 }
 
 /// Percussive: strikes fast and decays to silence while held (no sustain).
@@ -21,6 +22,7 @@ const PLUCKED: fn(Waveform) -> Instrument = |waveform| Instrument {
     decay_s: 0.5,
     sustain_level: 0.0,
     release_s: 0.2,
+    cutoff_hz: 6000.0,
 };
 
 /// Sustained: eases in and holds at full level until released.
@@ -30,6 +32,7 @@ const SUSTAINED: fn(Waveform) -> Instrument = |waveform| Instrument {
     decay_s: 0.1,
     sustain_level: 0.8,
     release_s: 0.3,
+    cutoff_hz: 3500.0,
 };
 
 /// Pick an instrument for a channel from its General MIDI program number,
@@ -42,6 +45,7 @@ pub fn for_channel(channel: u8, program: u8) -> Instrument {
             decay_s: 0.12,
             sustain_level: 0.0,
             release_s: 0.05,
+            cutoff_hz: 8000.0,
         };
     }
     match program {

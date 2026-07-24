@@ -1,4 +1,5 @@
 mod envelope;
+mod filter;
 mod instrument;
 mod oscillator;
 mod voice;
