@@ -1,0 +1,67 @@
+use std::sync::mpsc::{Receiver, Sender, channel};
+
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{FromSample, Sample, SampleFormat, SizedSample, Stream};
+
+use crate::synth::{Synth, SynthCommand};
+
+pub fn build_stream() -> (Stream, Sender<SynthCommand>) {
+    let host = cpal::default_host();
+    let device = host
+        .default_output_device()
+        .expect("no output device available");
+
+    let supported_config = device
+        .supported_output_configs()
+        .expect("error while querying configs")
+        .next()
+        .expect("no supported config?!")
+        .with_max_sample_rate();
+
+    let sample_format = supported_config.sample_format();
+    let config = supported_config.into();
+
+    let (tx, rx) = channel();
+
+    let stream = match sample_format {
+        SampleFormat::F32 => run::<f32>(&device, config, rx),
+        SampleFormat::I16 => run::<i16>(&device, config, rx),
+        SampleFormat::U16 => run::<u16>(&device, config, rx),
+        other => panic!("Unsupported sample format '{other}'"),
+    };
+
+    (stream, tx)
+}
+
+fn run<T>(device: &cpal::Device, config: cpal::StreamConfig, rx: Receiver<SynthCommand>) -> Stream
+where
+    T: Sample + SizedSample + FromSample<f32>,
+{
+    let sample_rate = config.sample_rate as f32;
+    let channels = config.channels as usize;
+    let mut synth = Synth::new(sample_rate);
+
+    let err_fn = |err| eprintln!("audio stream error: {err}");
+
+    let stream = device
+        .build_output_stream(
+            config,
+            move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
+                while let Ok(command) = rx.try_recv() {
+                    synth.handle(command);
+                }
+                for frame in data.chunks_mut(channels) {
+                    let value = T::from_sample(synth.next_sample());
+                    for sample in frame.iter_mut() {
+                        *sample = value;
+                    }
+                }
+            },
+            err_fn,
+            None,
+        )
+        .unwrap();
+
+    stream.play().unwrap();
+    stream
+}
