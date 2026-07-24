@@ -37,6 +37,7 @@ pub struct Voice {
     rng: Rng,
     channel: u8,
     note: Option<u8>,
+    release_s: f32,
     age: u32,
     established_after: u32,
     filter_countdown: u32,
@@ -74,6 +75,7 @@ impl Voice {
             rng: Rng::new(seed),
             channel: 0,
             note: None,
+            release_s: 0.2,
             age: 0,
             established_after: (ESTABLISHED_MS / 1000.0 * sample_rate) as u32,
             filter_countdown: 0,
@@ -190,6 +192,7 @@ impl Voice {
         self.body_level = 1.0;
         self.body_decay = (-1.0 / (instrument.body_decay_s * self.sample_rate)).exp();
 
+        self.release_s = instrument.release_s;
         self.envelope.configure(
             instrument.attack_s,
             instrument.decay_s,
@@ -199,7 +202,11 @@ impl Voice {
         self.envelope.trigger();
     }
 
-    pub fn note_off(&mut self) {
+    /// `scale` retimes the release, from the note-off velocity.
+    pub fn note_off(&mut self, scale: f32) {
+        if scale != 1.0 {
+            self.envelope.set_release(self.release_s * scale);
+        }
         self.envelope.release();
     }
 

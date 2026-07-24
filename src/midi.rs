@@ -18,6 +18,7 @@ pub mod cc {
     pub const ATTACK_TIME: u8 = 73;
     pub const BRIGHTNESS: u8 = 74;
     pub const SOSTENUTO: u8 = 66;
+    pub const REVERB_SEND: u8 = 91;
     pub const SOFT: u8 = 67;
     pub const DATA_INCREMENT: u8 = 96;
     pub const DATA_DECREMENT: u8 = 97;
@@ -37,8 +38,19 @@ pub mod cc {
     pub const POLY_MODE: u8 = 127;
 }
 
-/// Registered parameter 0: how far a full pitch bend reaches.
+/// The registered parameters this synth understands.
 pub const RPN_PITCH_BEND_SENSITIVITY: (u8, u8) = (0, 0);
+pub const RPN_FINE_TUNING: (u8, u8) = (0, 1);
+pub const RPN_COARSE_TUNING: (u8, u8) = (0, 2);
+pub const RPN_MODULATION_DEPTH_RANGE: (u8, u8) = (0, 5);
+
+/// General MIDI starts every channel with this much reverb send.
+pub const DEFAULT_REVERB_SEND: f32 = 40.0 / 127.0;
+
+/// A note-off carrying velocity 0 means "unspecified" rather than "as slow as
+/// possible", which is how the overwhelming majority of files are written.
+pub const UNSPECIFIED_RELEASE_VELOCITY: u8 = 0;
+pub const NEUTRAL_RELEASE_VELOCITY: u8 = 64;
 
 /// Pitch bend is 14-bit, centred at 8192.
 pub const PITCH_BEND_CENTRE: i16 = 8192;

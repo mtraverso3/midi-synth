@@ -1,9 +1,12 @@
 use crate::midi::{
-    DEFAULT_BEND_SEMITONES, PEDAL_THRESHOLD, RPN_PITCH_BEND_SENSITIVITY, cc, is_channel_mode,
+    DEFAULT_BEND_SEMITONES, DEFAULT_REVERB_SEND, PEDAL_THRESHOLD, RPN_COARSE_TUNING,
+    RPN_FINE_TUNING, RPN_MODULATION_DEPTH_RANGE, RPN_PITCH_BEND_SENSITIVITY, cc, is_channel_mode,
 };
 
-/// How much vibrato the modulation wheel adds at full travel.
-const MODULATION_DEPTH: f32 = 0.02;
+/// How much vibrato the modulation wheel adds per semitone of its range.
+const MODULATION_PER_SEMITONE: f32 = 0.04;
+/// The modulation range a channel starts with, in semitones.
+const DEFAULT_MODULATION_SEMITONES: f32 = 0.5;
 /// How far the soft pedal holds a note back.
 const SOFT_PEDAL: f32 = 0.7;
 
@@ -18,8 +21,11 @@ pub struct Channel {
     pub sustain: bool,
     pub sostenuto: bool,
     pub soft: f32,
+    /// Mod wheel travel, 0.0..=1.0, and the depth a full sweep reaches.
     pub modulation: f32,
+    pub modulation_range: f32,
     pub pressure: f32,
+    pub reverb_send: f32,
     /// Sound controllers 71-74, each a multiplier centred on 1.0 at value 64.
     pub resonance: f32,
     pub release_scale: f32,
@@ -28,10 +34,14 @@ pub struct Channel {
     /// Bend in semitones, and the multiplier it works out to.
     pub bend_semitones: f32,
     pub bend_range: f32,
+    /// Channel tuning from RPNs 1 and 2, in semitones.
+    pub tuning: f32,
     pub pitch_scale: f32,
     /// The parameter number data entry is currently pointed at. `None` once a
     /// non-registered parameter is selected, which we do not implement.
     parameter: Option<(u8, u8)>,
+    /// The most recent data entry value, as (MSB, LSB).
+    data: (u8, u8),
 }
 
 /// What the synth must do in response, beyond updating channel state.
@@ -59,15 +69,19 @@ impl Default for Channel {
             sostenuto: false,
             soft: 1.0,
             modulation: 0.0,
+            modulation_range: DEFAULT_MODULATION_SEMITONES,
             pressure: 0.0,
+            reverb_send: DEFAULT_REVERB_SEND,
             resonance: 1.0,
             release_scale: 1.0,
             attack_scale: 1.0,
             brightness_scale: 1.0,
             bend_semitones: 0.0,
             bend_range: DEFAULT_BEND_SEMITONES,
+            tuning: 0.0,
             pitch_scale: 1.0,
             parameter: None,
+            data: (0, 0),
         }
     }
 }
@@ -86,9 +100,10 @@ impl Channel {
             cc::EXPRESSION => self.expression = unit,
             cc::PAN => self.pan = pan_gains(value),
             cc::MODULATION => {
-                self.modulation = unit * MODULATION_DEPTH;
+                self.modulation = unit;
                 return Action::ModulationChanged;
             }
+            cc::REVERB_SEND => self.reverb_send = unit,
             cc::SOFT => self.soft = 1.0 - unit * (1.0 - SOFT_PEDAL),
             // Sound controllers are relative, with 64 meaning "as the patch is".
             cc::RESONANCE => self.resonance = centred(value, 2.0),
@@ -115,26 +130,51 @@ impl Channel {
             cc::RPN_LSB => self.parameter = Some((self.parameter.map_or(0, |(m, _)| m), value)),
             // Selecting a non-registered parameter takes data entry out of play.
             cc::NRPN_MSB | cc::NRPN_LSB => self.parameter = None,
-            cc::DATA_ENTRY_MSB => self.data_entry(f32::from(value)),
-            cc::DATA_ENTRY_LSB => self.data_entry_fine(f32::from(value)),
-            cc::DATA_INCREMENT => self.data_entry(self.bend_range + 1.0),
-            cc::DATA_DECREMENT => self.data_entry(self.bend_range - 1.0),
+            // An MSB write restarts the value, so a file that sends only the
+            // coarse half still lands on the right number.
+            cc::DATA_ENTRY_MSB => {
+                self.data = (value, 0);
+                self.apply_parameter();
+            }
+            cc::DATA_ENTRY_LSB => {
+                self.data.1 = value;
+                self.apply_parameter();
+            }
+            cc::DATA_INCREMENT => {
+                self.data.0 = self.data.0.saturating_add(1).min(127);
+                self.apply_parameter();
+            }
+            cc::DATA_DECREMENT => {
+                self.data.0 = self.data.0.saturating_sub(1);
+                self.apply_parameter();
+            }
             _ => {}
         }
         Action::None
     }
 
-    fn data_entry(&mut self, semitones: f32) {
-        if self.parameter == Some(RPN_PITCH_BEND_SENSITIVITY) {
-            self.bend_range = semitones.clamp(0.0, 96.0);
-            self.refresh_bend();
-        }
-    }
-
-    fn data_entry_fine(&mut self, cents: f32) {
-        if self.parameter == Some(RPN_PITCH_BEND_SENSITIVITY) {
-            self.bend_range = self.bend_range.trunc() + cents / 100.0;
-            self.refresh_bend();
+    fn apply_parameter(&mut self) {
+        let (msb, lsb) = self.data;
+        match self.parameter {
+            Some(RPN_PITCH_BEND_SENSITIVITY) => {
+                // MSB is semitones, LSB cents.
+                self.bend_range = f32::from(msb) + f32::from(lsb) / 100.0;
+                self.refresh_pitch();
+            }
+            Some(RPN_FINE_TUNING) => {
+                // 14-bit, centred on 8192, spanning a semitone either way.
+                let raw = i32::from(msb) << 7 | i32::from(lsb);
+                self.tuning = self.tuning.trunc() + (raw - 8192) as f32 / 8192.0;
+                self.refresh_pitch();
+            }
+            Some(RPN_COARSE_TUNING) => {
+                self.tuning = f32::from(msb) - 64.0 + self.tuning.fract();
+                self.refresh_pitch();
+            }
+            Some(RPN_MODULATION_DEPTH_RANGE) => {
+                self.modulation_range = f32::from(msb) + f32::from(lsb) / 128.0;
+            }
+            _ => {}
         }
     }
 
@@ -149,6 +189,8 @@ impl Channel {
                 self.sustain = false;
                 self.sostenuto = false;
                 self.soft = 1.0;
+                self.reverb_send = DEFAULT_REVERB_SEND;
+                self.modulation_range = DEFAULT_MODULATION_SEMITONES;
                 self.resonance = 1.0;
                 self.release_scale = 1.0;
                 self.attack_scale = 1.0;
@@ -156,6 +198,7 @@ impl Channel {
                 self.bend_semitones = 0.0;
                 self.pitch_scale = 1.0;
                 self.parameter = None;
+                self.data = (0, 0);
                 Action::PedalReleased
             }
             // Local control has no meaning without a local keyboard.
@@ -171,17 +214,18 @@ impl Channel {
     /// `offset` is the raw 14-bit distance from centre.
     pub fn set_bend(&mut self, offset: i16) {
         self.bend_semitones = f32::from(offset) / 8192.0 * self.bend_range;
-        self.refresh_bend();
+        self.refresh_pitch();
     }
 
-    fn refresh_bend(&mut self) {
-        self.bend_semitones = self.bend_semitones.clamp(-96.0, 96.0);
-        self.pitch_scale = 2.0f32.powf(self.bend_semitones / 12.0);
+    fn refresh_pitch(&mut self) {
+        let semitones = (self.bend_semitones + self.tuning).clamp(-96.0, 96.0);
+        self.pitch_scale = 2.0f32.powf(semitones / 12.0);
     }
 
     /// Total vibrato the channel is asking for, from the wheel and aftertouch.
     pub fn vibrato(&self) -> f32 {
-        self.modulation + self.pressure * MODULATION_DEPTH
+        let depth = self.modulation_range * MODULATION_PER_SEMITONE;
+        (self.modulation + self.pressure) * depth
     }
 
     /// Gain a note struck now should be played at.

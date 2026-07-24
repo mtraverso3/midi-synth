@@ -48,6 +48,15 @@ impl Envelope {
         self.release_coeff = coeff(release_s);
     }
 
+    /// Retime just the release, for note-off velocity.
+    pub fn set_release(&mut self, seconds: f32) {
+        self.release_coeff = if seconds <= 0.0 {
+            1.0
+        } else {
+            1.0 - (-1.0 / (seconds * self.sample_rate)).exp()
+        };
+    }
+
     pub fn trigger(&mut self) {
         self.stage = Stage::Attack;
     }

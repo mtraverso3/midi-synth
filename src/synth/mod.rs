@@ -13,14 +13,16 @@ use reverb::Reverb;
 use voice::Voice;
 
 use crate::engine::{Command, Engine, write_frame};
+use crate::midi::{NEUTRAL_RELEASE_VELOCITY, UNSPECIFIED_RELEASE_VELOCITY};
 
 const VOICE_COUNT: usize = 8192;
 const CHANNEL_COUNT: usize = 16;
 const MASTER_GAIN: f32 = 0.42;
 /// Vibrato that full polyphonic key pressure adds to a single note.
 const POLY_PRESSURE_DEPTH: f32 = 0.02;
-/// How much reverb is folded back in; enough to place the notes in a room.
-const REVERB_MIX: f32 = 0.22;
+/// How much of the reverb send is folded back in. Scaled so a channel sitting
+/// at the General MIDI default send lands where the fixed mix used to.
+const REVERB_MIX: f32 = 0.7;
 
 pub struct Synth {
     voices: Vec<Voice>,
@@ -93,7 +95,7 @@ impl Synth {
                     for &index in &self.sounding {
                         let voice = &mut self.voices[index];
                         if voice.channel() == channel && voice.is_sustained() {
-                            voice.note_off();
+                            voice.note_off(1.0);
                         }
                     }
                 }
@@ -102,7 +104,7 @@ impl Synth {
                 for &index in &self.sounding {
                     let voice = &mut self.voices[index];
                     if voice.channel() == channel {
-                        voice.note_off();
+                        voice.note_off(1.0);
                     }
                 }
             }
@@ -125,6 +127,7 @@ impl Synth {
     fn next_frame(&mut self) -> (f32, f32) {
         let mut dry_left = 0.0;
         let mut dry_right = 0.0;
+        let mut send = 0.0;
         let mut position = 0;
         while position < self.sounding.len() {
             let index = self.sounding[position];
@@ -136,6 +139,7 @@ impl Synth {
                 let (left, right) = state.pan;
                 dry_left += level * left;
                 dry_right += level * right;
+                send += level * state.reverb_send;
                 position += 1;
             } else {
                 self.sounding.swap_remove(position);
@@ -145,7 +149,7 @@ impl Synth {
         let gain = MASTER_GAIN * self.master_volume;
         let dry_left = dry_left * gain;
         let dry_right = dry_right * gain;
-        let (wet_left, wet_right) = self.reverb.process((dry_left + dry_right) * 0.5);
+        let (wet_left, wet_right) = self.reverb.process(send * gain);
         (
             dry_left + wet_left * REVERB_MIX,
             dry_right + wet_right * REVERB_MIX,
@@ -171,16 +175,21 @@ impl Engine for Synth {
                 self.allocate_voice()
                     .note_on(channel, note, velocity, instrument);
             }
-            Command::NoteOff { channel, note, .. } => {
+            Command::NoteOff {
+                channel,
+                note,
+                velocity,
+            } => {
                 let state = &self.channels[channel as usize];
                 let held = state.sustain || state.sostenuto;
+                let scale = release_scale(velocity);
                 for &index in &self.sounding {
                     let voice = &mut self.voices[index];
                     if voice.is_active() && voice.matches(channel, note) {
                         if held {
                             voice.hold();
                         } else {
-                            voice.note_off();
+                            voice.note_off(scale);
                         }
                     }
                 }
@@ -241,4 +250,14 @@ impl Engine for Synth {
             write_frame(frame, left, right);
         }
     }
+}
+
+/// How note-off velocity retimes the release. Velocity 0 means the file did not
+/// specify one, which is how nearly every file is written, so it stays neutral.
+fn release_scale(velocity: u8) -> f32 {
+    if velocity == UNSPECIFIED_RELEASE_VELOCITY {
+        return 1.0;
+    }
+    let offset = f32::from(NEUTRAL_RELEASE_VELOCITY) - f32::from(velocity);
+    2.0f32.powf(offset / 64.0)
 }
