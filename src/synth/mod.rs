@@ -83,7 +83,7 @@ impl Engine for Synth {
                 velocity,
             } => {
                 let program = self.programs[channel as usize];
-                let instrument = instrument::for_channel(channel, program);
+                let instrument = instrument::for_note(channel, program, note);
                 self.allocate_voice()
                     .note_on(channel, note, velocity, instrument);
             }

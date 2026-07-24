@@ -39,6 +39,9 @@ pub struct Voice {
     vibrato_age_s: f32,
     body_level: f32,
     body_decay: f32,
+    noise_mix: f32,
+    pitch_offset: f32,
+    pitch_decay: f32,
     cutoff_hz: f32,
     cutoff_range_hz: f32,
 }
@@ -67,6 +70,9 @@ impl Voice {
             vibrato_age_s: 0.0,
             body_level: 1.0,
             body_decay: 1.0,
+            noise_mix: 0.0,
+            pitch_offset: 0.0,
+            pitch_decay: 0.0,
             cutoff_hz: 1000.0,
             cutoff_range_hz: 0.0,
         }
@@ -105,7 +111,8 @@ impl Voice {
         let velocity = velocity as f32 / 127.0;
         self.amplitude = velocity * (1.0 + self.rng.next_bipolar() * LEVEL_JITTER);
 
-        self.frequency = note_to_freq(note);
+        // Percussion tunes itself: the note picked the sound, not the pitch.
+        self.frequency = instrument.fixed_pitch.unwrap_or_else(|| note_to_freq(note));
         self.detune_ratio = DETUNE * (1.0 + self.rng.next_bipolar() * DETUNE_JITTER);
         self.oscillator.set_waveform(instrument.waveform);
         self.detuned.set_waveform(instrument.waveform);
@@ -117,6 +124,10 @@ impl Voice {
         self.cutoff_hz = self.frequency * instrument.cutoff_ratio;
         self.cutoff_range_hz = self.cutoff_hz * instrument.brightness * velocity_brightness;
         self.filter.reset();
+
+        self.noise_mix = instrument.noise_mix;
+        self.pitch_offset = instrument.pitch_drop;
+        self.pitch_decay = (-1.0 / (instrument.pitch_drop_s * self.sample_rate)).exp();
 
         self.transient_level = instrument.transient * velocity;
         self.transient
@@ -169,14 +180,16 @@ impl Voice {
         } else {
             0.0
         };
-        let frequency = self.frequency * (1.0 + vibrato);
+        self.pitch_offset *= self.pitch_decay;
+        let frequency = self.frequency * (1.0 + vibrato) * semitones(self.pitch_offset);
         self.oscillator.set_frequency(frequency);
         self.detuned.set_frequency(frequency * self.detune_ratio);
 
-        let tone = (self.oscillator.next_sample() + self.detuned.next_sample() * DETUNE_MIX)
+        let pitched = (self.oscillator.next_sample() + self.detuned.next_sample() * DETUNE_MIX)
             / (1.0 + DETUNE_MIX);
-        let transient =
-            self.noise.next_sample() * self.transient.next_sample() * self.transient_level;
+        let noise = self.noise.next_sample();
+        let tone = pitched * (1.0 - self.noise_mix) + noise * self.noise_mix;
+        let transient = noise * self.transient.next_sample() * self.transient_level;
 
         // The filter envelope closes over the note, so it starts bright and darkens.
         self.filter
@@ -185,6 +198,14 @@ impl Voice {
 
         self.body_level *= self.body_decay;
         filtered * self.envelope.next_sample() * self.amplitude * self.body_level
+    }
+}
+
+fn semitones(offset: f32) -> f32 {
+    if offset == 0.0 {
+        1.0
+    } else {
+        2.0f32.powf(offset / 12.0)
     }
 }
 

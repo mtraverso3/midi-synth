@@ -1,14 +1,17 @@
 use super::rng::Rng;
 
 #[derive(Clone, Copy)]
-#[allow(dead_code)]
 pub enum Waveform {
     Sine,
     Saw,
-    Square,
+    /// Rectangle wave; the duty cycle sets how nasal or hollow it sounds.
+    /// A duty of 0.5 is a square wave.
+    Pulse(f32),
     Triangle,
     Noise,
 }
+
+pub const SQUARE: Waveform = Waveform::Pulse(0.5);
 
 pub struct Oscillator {
     sample_rate: f32,
@@ -45,9 +48,12 @@ impl Oscillator {
         let value = match self.waveform {
             Waveform::Sine => (self.phase * std::f32::consts::TAU).sin(),
             Waveform::Saw => 2.0 * self.phase - 1.0 - self.blep(self.phase),
-            Waveform::Square => {
-                let raw = if self.phase < 0.5 { 1.0 } else { -1.0 };
-                raw - self.blep(self.phase) + self.blep((self.phase + 0.5).fract())
+            Waveform::Pulse(duty) => {
+                let duty = duty.clamp(0.05, 0.5);
+                let raw = if self.phase < duty { 1.0 } else { -1.0 };
+                let edge = self.blep(self.phase) - self.blep((self.phase - duty).rem_euclid(1.0));
+                // Recentre and rescale: a narrow pulse is otherwise offset and hot.
+                (raw - (2.0 * duty - 1.0) - edge) / (2.0 - 2.0 * duty)
             }
             Waveform::Triangle => {
                 if self.phase < 0.5 {
