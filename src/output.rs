@@ -38,9 +38,15 @@ fn write_mp3(path: &Path, samples: &[f32], sample_rate: u32) -> Result<(), Error
 
     let mut builder = Builder::new().ok_or("failed to create MP3 encoder")?;
     builder.set_num_channels(1).map_err(|e| e.to_string())?;
-    builder.set_sample_rate(sample_rate).map_err(|e| e.to_string())?;
-    builder.set_brate(Bitrate::Kbps192).map_err(|e| e.to_string())?;
-    builder.set_quality(Quality::Best).map_err(|e| e.to_string())?;
+    builder
+        .set_sample_rate(sample_rate)
+        .map_err(|e| e.to_string())?;
+    builder
+        .set_brate(Bitrate::Kbps192)
+        .map_err(|e| e.to_string())?;
+    builder
+        .set_quality(Quality::Best)
+        .map_err(|e| e.to_string())?;
     let mut encoder = builder.build().map_err(|e| e.to_string())?;
 
     let pcm = to_i16(samples);

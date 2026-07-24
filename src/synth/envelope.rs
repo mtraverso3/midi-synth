@@ -7,7 +7,7 @@ enum Stage {
     Release,
 }
 
-/// How close to a target level counts as "arrived", ending a stage.
+/// Distance from a target level that counts as "arrived", ending a stage.
 const EPSILON: f32 = 0.001;
 
 pub struct Envelope {
@@ -34,8 +34,7 @@ impl Envelope {
     }
 
     pub fn configure(&mut self, attack_s: f32, decay_s: f32, sustain_level: f32, release_s: f32) {
-        // One-pole smoothing coefficient: each sample moves this fraction of the
-        // remaining distance to the target, giving an exponential curve.
+        // Per-sample fraction of the remaining distance to cover: an exponential curve.
         let coeff = |seconds: f32| {
             if seconds <= 0.0 {
                 1.0
@@ -87,8 +86,7 @@ impl Envelope {
                     self.stage = Stage::Sustain;
                 }
             }
-            // A note whose sustain is silence (plucked/percussive) has fully
-            // faded, so free the voice instead of holding at zero forever.
+            // Plucked/percussive notes (sustain 0) have faded: free the voice.
             Stage::Sustain if self.sustain_level < EPSILON => self.stage = Stage::Idle,
             Stage::Sustain => self.level = self.sustain_level,
             Stage::Release => {

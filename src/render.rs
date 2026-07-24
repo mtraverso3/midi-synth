@@ -1,13 +1,10 @@
+use crate::TAIL_SECONDS;
 use crate::midi::Event;
 use crate::sequencer::to_command;
 use crate::synth::Synth;
 
-/// Tail rendered after the last event so final release tails aren't clipped.
-const TAIL_SECONDS: f64 = 2.0;
-
-/// Render events to a mono f32 buffer, faster than real time. Advances the
-/// synth one sample at a time, applying each command when the sample clock
-/// reaches its timestamp.
+/// Render events to a mono f32 buffer, faster than real time, by advancing the
+/// synth to each event's sample position and applying it.
 pub fn render(events: &[Event], sample_rate: u32) -> Vec<f32> {
     let mut synth = Synth::new(sample_rate as f32);
     let total = events.last().map(|e| e.time_s).unwrap_or(0.0) + TAIL_SECONDS;

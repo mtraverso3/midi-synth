@@ -1,6 +1,5 @@
-/// A one-pole low-pass filter: each sample eases toward the input, which lets
-/// slow (low-frequency) changes through while smoothing away fast (high-
-/// frequency) detail — rounding off the harsh edges of saw and square waves.
+/// One-pole low-pass filter: eases toward the input, smoothing away the harsh
+/// high-frequency edges of saw and square waves.
 pub struct LowPass {
     alpha: f32,
     prev: f32,

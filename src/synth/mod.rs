@@ -12,9 +12,19 @@ const CHANNEL_COUNT: usize = 16;
 const MASTER_GAIN: f32 = 0.3;
 
 pub enum SynthCommand {
-    NoteOn { channel: u8, note: u8, velocity: u8 },
-    NoteOff { channel: u8, note: u8 },
-    ProgramChange { channel: u8, program: u8 },
+    NoteOn {
+        channel: u8,
+        note: u8,
+        velocity: u8,
+    },
+    NoteOff {
+        channel: u8,
+        note: u8,
+    },
+    ProgramChange {
+        channel: u8,
+        program: u8,
+    },
     /// Freeze/unfreeze the whole synth (for pause).
     SetPaused(bool),
     /// Immediately silence every voice (for seek).
@@ -45,7 +55,8 @@ impl Synth {
             } => {
                 let program = self.programs[channel as usize];
                 let instrument = instrument::for_channel(channel, program);
-                self.allocate_voice().note_on(channel, note, velocity, instrument);
+                self.allocate_voice()
+                    .note_on(channel, note, velocity, instrument);
             }
             SynthCommand::NoteOff { channel, note } => {
                 for voice in &mut self.voices {

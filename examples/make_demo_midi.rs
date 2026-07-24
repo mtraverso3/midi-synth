@@ -112,7 +112,10 @@ fn build_track(channel: u8, program: u8, notes: &[Note]) -> Track<'static> {
         };
         track.push(TrackEvent {
             delta: u28::new(tick - last_tick),
-            kind: TrackEventKind::Midi { channel: ch, message },
+            kind: TrackEventKind::Midi {
+                channel: ch,
+                message,
+            },
         });
         last_tick = tick;
     }

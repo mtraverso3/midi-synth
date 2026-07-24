@@ -3,10 +3,10 @@ use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use crossterm::execute;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Layout};
@@ -77,7 +77,8 @@ fn handle_input(controls: &Sender<Control>) -> io::Result<Option<()>> {
         return Ok(None);
     }
     if let Event::Key(key) = event::read()? {
-        let ctrl_c = key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
+        let ctrl_c =
+            key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => return Ok(Some(())),
             _ if ctrl_c => return Ok(Some(())),
@@ -136,8 +137,8 @@ fn draw(frame: &mut ratatui::Frame, monitor: &Monitor, title: &str, total_s: f64
             .iter()
             .map(|&ch| channel_line(ch, monitor.active[ch], monitor.programs[ch])),
     );
-    let channels_widget = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title(" Channels "));
+    let channels_widget =
+        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" Channels "));
     frame.render_widget(channels_widget, areas[1]);
 
     let stats = Paragraph::new(vec![
@@ -178,7 +179,11 @@ fn channel_line(channel: usize, active: u128, program: u8) -> Line<'static> {
 
     let mut strip = String::with_capacity((HIGH_NOTE - LOW_NOTE + 1) as usize);
     for note in LOW_NOTE..=HIGH_NOTE {
-        strip.push(if active & (1 << note) != 0 { '█' } else { '·' });
+        strip.push(if active & (1 << note) != 0 {
+            '█'
+        } else {
+            '·'
+        });
     }
 
     let label = format!("ch{channel:2} {name:<10} ");

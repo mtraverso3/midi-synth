@@ -35,10 +35,9 @@ pub struct Monitor {
 
 pub type SharedMonitor = Arc<Mutex<Monitor>>;
 
-/// Plays events through `tx` using a song clock that advances in real time
-/// while running and freezes while paused, reacting to transport `controls`.
-/// `total_s` is the full length (including release tail) so the clock keeps
-/// running past the last event. Assumes `events` is sorted by `time_s`.
+/// Plays sorted `events` through `tx` on a song clock that advances in real
+/// time, freezes while paused, and jumps on seek — driven by `controls`.
+/// `total_s` (including the release tail) keeps the clock running past the end.
 pub fn play(
     events: &[Event],
     tx: &Sender<SynthCommand>,

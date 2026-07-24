@@ -36,7 +36,9 @@ struct Cli {
 }
 
 const SAMPLE_RATE: u32 = 44_100;
-const TAIL_SECONDS: f64 = 2.0;
+
+/// Silence rendered after the last event so release tails aren't clipped.
+pub(crate) const TAIL_SECONDS: f64 = 2.0;
 
 fn main() {
     let cli = Cli::parse();
@@ -48,9 +50,9 @@ fn main() {
             std::process::exit(1);
         }
     };
+    println!("Loaded {} events from {}", events.len(), cli.file.display());
 
     if let Some(path) = cli.output {
-        println!("Loaded {} events from {}", events.len(), cli.file.display());
         println!("Rendering to {}...", path.display());
         let samples = render::render(&events, SAMPLE_RATE);
         if let Err(e) = output::write(&path, &samples, SAMPLE_RATE) {
@@ -67,7 +69,6 @@ fn main() {
         return;
     }
 
-    println!("Loaded {} events from {}", events.len(), cli.file.display());
     let total_s = total_seconds(&events);
     let (_stream, tx) = audio::build_stream();
     let (_ctl_tx, ctl_rx) = mpsc::channel();

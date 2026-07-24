@@ -3,9 +3,7 @@ use super::filter::LowPass;
 use super::instrument::Instrument;
 use super::oscillator::{Oscillator, Waveform};
 
-/// Frequency ratio of the second oscillator relative to the first (~10 cents).
-/// The slight mismatch makes the two drift in and out of phase, thickening the
-/// tone.
+/// Second-oscillator detune (~10 cents); the drift against the first thickens the tone.
 const DETUNE: f32 = 1.006;
 
 pub struct Voice {
@@ -37,8 +35,7 @@ impl Voice {
         !self.envelope.is_finished()
     }
 
-    /// Current output weight (0.0..1.0), used to pick the least audible voice
-    /// to steal when the pool is full.
+    /// Current loudness (0.0..1.0), used to steal the quietest voice.
     pub fn level(&self) -> f32 {
         self.envelope.level() * self.amplitude
     }
@@ -57,7 +54,8 @@ impl Voice {
         self.oscillator.set_frequency(freq);
         self.detuned.set_waveform(instrument.waveform);
         self.detuned.set_frequency(freq * DETUNE);
-        self.filter.set_cutoff(self.sample_rate, instrument.cutoff_hz);
+        self.filter
+            .set_cutoff(self.sample_rate, instrument.cutoff_hz);
 
         self.envelope.configure(
             instrument.attack_s,

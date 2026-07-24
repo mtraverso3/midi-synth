@@ -1,10 +1,8 @@
 use super::oscillator::Waveform;
 
-/// MIDI channel 9 (0-indexed) is reserved for percussion by the General MIDI
-/// standard, regardless of program.
+/// General MIDI reserves channel 9 for percussion, regardless of program.
 const DRUM_CHANNEL: u8 = 9;
 
-/// A sound design: which wave to use and how its amplitude evolves over a note.
 #[derive(Clone, Copy)]
 pub struct Instrument {
     pub waveform: Waveform,
@@ -35,7 +33,7 @@ const SUSTAINED: fn(Waveform) -> Instrument = |waveform| Instrument {
     cutoff_hz: 3500.0,
 };
 
-/// Short General MIDI family label for a channel, for display.
+/// Short General MIDI family label, for display.
 pub fn family_name(channel: u8, program: u8) -> &'static str {
     if channel == DRUM_CHANNEL {
         return "Drums";
@@ -57,8 +55,7 @@ pub fn family_name(channel: u8, program: u8) -> &'static str {
     }
 }
 
-/// Pick an instrument for a channel from its General MIDI program number,
-/// grouping programs into families that share a timbre and amplitude shape.
+/// Map a General MIDI program to a synth voice, by instrument family.
 pub fn for_channel(channel: u8, program: u8) -> Instrument {
     if channel == DRUM_CHANNEL {
         return Instrument {
@@ -71,12 +68,12 @@ pub fn for_channel(channel: u8, program: u8) -> Instrument {
         };
     }
     match program {
-        0..=15 => PLUCKED(Waveform::Triangle),  // pianos, chromatic percussion
-        16..=23 => SUSTAINED(Waveform::Sine),   // organs
+        0..=15 => PLUCKED(Waveform::Triangle), // pianos, chromatic percussion
+        16..=23 => SUSTAINED(Waveform::Sine),  // organs
         24..=39 => PLUCKED(Waveform::Triangle), // guitars, basses
-        40..=63 => SUSTAINED(Waveform::Saw),    // strings, ensembles, brass
+        40..=63 => SUSTAINED(Waveform::Saw),   // strings, ensembles, brass
         64..=71 => SUSTAINED(Waveform::Square), // reeds
-        72..=79 => SUSTAINED(Waveform::Sine),   // pipes, flutes
-        _ => SUSTAINED(Waveform::Square),       // synth leads and everything else
+        72..=79 => SUSTAINED(Waveform::Sine),  // pipes, flutes
+        _ => SUSTAINED(Waveform::Square),      // synth leads and everything else
     }
 }

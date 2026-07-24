@@ -12,10 +12,20 @@ const TICKS_PER_BEAT: u16 = 480;
 fn main() {
     // (MIDI note, beats)
     let melody: &[(u8, u32)] = &[
-        (60, 1), (60, 1), (67, 1), (67, 1),
-        (69, 1), (69, 1), (67, 2),
-        (65, 1), (65, 1), (64, 1), (64, 1),
-        (62, 1), (62, 1), (60, 2),
+        (60, 1),
+        (60, 1),
+        (67, 1),
+        (67, 1),
+        (69, 1),
+        (69, 1),
+        (67, 2),
+        (65, 1),
+        (65, 1),
+        (64, 1),
+        (64, 1),
+        (62, 1),
+        (62, 1),
+        (60, 2),
     ];
 
     let mut track = Track::new();
@@ -55,7 +65,10 @@ fn main() {
     });
 
     let smf = Smf {
-        header: Header::new(Format::SingleTrack, Timing::Metrical(u15::new(TICKS_PER_BEAT))),
+        header: Header::new(
+            Format::SingleTrack,
+            Timing::Metrical(u15::new(TICKS_PER_BEAT)),
+        ),
         tracks: vec![track],
     };
 
