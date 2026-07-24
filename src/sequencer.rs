@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use crate::engine::Command;
 use crate::smf::{Event, EventKind};
-use crate::synth::SynthCommand;
 
 /// Seconds jumped by one seek step.
 pub const SEEK_STEP: f64 = 5.0;
@@ -42,26 +42,26 @@ impl Monitor {
 
 pub type SharedMonitor = Arc<Mutex<Monitor>>;
 
-pub fn to_command(event: &Event) -> SynthCommand {
+pub fn to_command(event: &Event) -> Command {
     match event.kind {
-        EventKind::NoteOn { note, velocity } => SynthCommand::NoteOn {
+        EventKind::NoteOn { note, velocity } => Command::NoteOn {
             channel: event.channel,
             note,
             velocity,
         },
-        EventKind::NoteOff { note } => SynthCommand::NoteOff {
+        EventKind::NoteOff { note } => Command::NoteOff {
             channel: event.channel,
             note,
         },
-        EventKind::ProgramChange { program } => SynthCommand::ProgramChange {
+        EventKind::ProgramChange { program } => Command::ProgramChange {
             channel: event.channel,
             program,
         },
-        EventKind::Sustain { on } => SynthCommand::Sustain {
+        EventKind::Sustain { on } => Command::Sustain {
             channel: event.channel,
             on,
         },
-        EventKind::Volume { level } => SynthCommand::SetVolume {
+        EventKind::Volume { level } => Command::SetVolume {
             channel: event.channel,
             level,
         },
@@ -83,7 +83,7 @@ pub enum Control {
 /// `total_s` (including the release tail) keeps the clock running past the end.
 pub fn play(
     events: &[Event],
-    tx: &Sender<SynthCommand>,
+    tx: &Sender<Command>,
     total_s: f64,
     verbose: bool,
     monitor: Option<&SharedMonitor>,
@@ -100,7 +100,7 @@ pub fn play(
                 Control::Stop => return,
                 Control::TogglePause => {
                     paused = !paused;
-                    let _ = tx.send(SynthCommand::SetPaused(paused));
+                    let _ = tx.send(Command::SetPaused(paused));
                 }
                 Control::Seek(delta) => {
                     song_time = (song_time + delta).clamp(0.0, total_s);
@@ -151,11 +151,11 @@ pub fn play(
 /// state (program, volume, sustain) from earlier events, rewind the cursor.
 fn seek(
     events: &[Event],
-    tx: &Sender<SynthCommand>,
+    tx: &Sender<Command>,
     song_time: f64,
     monitor: Option<&SharedMonitor>,
 ) -> usize {
-    let _ = tx.send(SynthCommand::AllNotesOff);
+    let _ = tx.send(Command::AllNotesOff);
 
     let index = events.partition_point(|e| e.time_s < song_time);
     for event in &events[..index] {

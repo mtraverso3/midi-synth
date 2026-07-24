@@ -1,35 +1,67 @@
-use std::sync::Arc;
+use crate::soundfont::{SoundFont, SoundFontEngine};
+use crate::synth::Synth;
 
-use rustysynth::SoundFont;
+type Error = Box<dyn std::error::Error>;
 
-use crate::soundfont::SoundFontEngine;
-use crate::synth::{Synth, SynthCommand};
+pub enum Command {
+    NoteOn { channel: u8, note: u8, velocity: u8 },
+    NoteOff { channel: u8, note: u8 },
+    ProgramChange { channel: u8, program: u8 },
+    Sustain { channel: u8, on: bool },
+    SetVolume { channel: u8, level: u8 },
+    SetPaused(bool),
+    AllNotesOff,
+}
 
-/// A sound source driven by [`SynthCommand`]s. Either our built-in synth or a
-/// SoundFont-backed one; the audio path treats them the same.
 pub trait Engine: Send {
-    fn handle(&mut self, command: SynthCommand);
-    /// Fill an interleaved buffer with `channels` channels per frame.
+    fn handle(&mut self, command: Command);
+    /// Fill `data` with interleaved frames of `channels` samples each.
     fn fill(&mut self, data: &mut [f32], channels: usize);
 }
 
-/// Build the SoundFont engine if one is supplied, else the built-in synth.
-pub fn build(soundfont: Option<Arc<SoundFont>>, sample_rate: u32) -> Box<dyn Engine> {
-    match soundfont {
-        Some(sf) => Box::new(SoundFontEngine::new(sf, sample_rate)),
+pub fn build(soundfont: Option<SoundFont>, sample_rate: u32) -> Result<Box<dyn Engine>, Error> {
+    let source: Box<dyn Engine> = match soundfont {
+        Some(bank) => Box::new(SoundFontEngine::new(&bank, sample_rate)?),
         None => Box::new(Synth::new(sample_rate as f32)),
+    };
+    Ok(Box::new(Paused {
+        source,
+        paused: false,
+    }))
+}
+
+pub(crate) fn write_frame(frame: &mut [f32], left: f32, right: f32) {
+    match frame {
+        [mono] => *mono = 0.5 * (left + right),
+        [l, r, rest @ ..] => {
+            *l = left;
+            *r = right;
+            rest.fill(0.0);
+        }
+        [] => {}
     }
 }
 
-impl Engine for Synth {
-    fn handle(&mut self, command: SynthCommand) {
-        Synth::handle(self, command);
+/// While paused the source is never advanced, so held notes resume exactly
+/// where they stopped.
+struct Paused {
+    source: Box<dyn Engine>,
+    paused: bool,
+}
+
+impl Engine for Paused {
+    fn handle(&mut self, command: Command) {
+        match command {
+            Command::SetPaused(paused) => self.paused = paused,
+            other => self.source.handle(other),
+        }
     }
 
     fn fill(&mut self, data: &mut [f32], channels: usize) {
-        for frame in data.chunks_mut(channels) {
-            let sample = self.next_sample();
-            frame.fill(sample);
+        if self.paused {
+            data.fill(0.0);
+        } else {
+            self.source.fill(data, channels);
         }
     }
 }

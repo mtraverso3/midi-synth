@@ -1,14 +1,14 @@
-use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample, Stream};
-use rustysynth::SoundFont;
 
-use midi::engine;
-use midi::synth::SynthCommand;
+use midi::engine::{self, Command};
+use midi::soundfont::SoundFont;
 
-pub fn build_stream(soundfont: Option<Arc<SoundFont>>) -> (Stream, Sender<SynthCommand>) {
+type Error = Box<dyn std::error::Error>;
+
+pub fn build_stream(soundfont: Option<SoundFont>) -> Result<(Stream, Sender<Command>), Error> {
     let host = cpal::default_host();
     let device = host
         .default_output_device()
@@ -27,26 +27,26 @@ pub fn build_stream(soundfont: Option<Arc<SoundFont>>) -> (Stream, Sender<SynthC
     let (tx, rx) = channel();
 
     let stream = match sample_format {
-        SampleFormat::F32 => run::<f32>(&device, config, rx, soundfont),
-        SampleFormat::I16 => run::<i16>(&device, config, rx, soundfont),
-        SampleFormat::U16 => run::<u16>(&device, config, rx, soundfont),
+        SampleFormat::F32 => run::<f32>(&device, config, rx, soundfont)?,
+        SampleFormat::I16 => run::<i16>(&device, config, rx, soundfont)?,
+        SampleFormat::U16 => run::<u16>(&device, config, rx, soundfont)?,
         other => panic!("Unsupported sample format '{other}'"),
     };
 
-    (stream, tx)
+    Ok((stream, tx))
 }
 
 fn run<T>(
     device: &cpal::Device,
     config: cpal::StreamConfig,
-    rx: Receiver<SynthCommand>,
-    soundfont: Option<Arc<SoundFont>>,
-) -> Stream
+    rx: Receiver<Command>,
+    soundfont: Option<SoundFont>,
+) -> Result<Stream, Error>
 where
     T: Sample + SizedSample + FromSample<f32>,
 {
     let channels = config.channels as usize;
-    let mut engine = engine::build(soundfont, config.sample_rate);
+    let mut engine = engine::build(soundfont, config.sample_rate)?;
     let mut scratch: Vec<f32> = Vec::new();
 
     let err_fn = |err| eprintln!("audio stream error: {err}");
@@ -70,5 +70,5 @@ where
         .unwrap();
 
     stream.play().unwrap();
-    stream
+    Ok(stream)
 }

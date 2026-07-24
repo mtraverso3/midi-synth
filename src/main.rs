@@ -9,10 +9,10 @@ use std::thread;
 use std::time::Duration;
 
 use clap::Parser;
-use rustysynth::SoundFont;
 
 use midi::sequencer::Monitor;
-use midi::{TAIL_SECONDS, engine, render, sequencer, smf, soundfont};
+use midi::soundfont::SoundFont;
+use midi::{TAIL_SECONDS, engine, render, sequencer, smf};
 
 /// A MIDI file player with a built-in software synthesizer.
 #[derive(Parser)]
@@ -44,18 +44,18 @@ const SAMPLE_RATE: u32 = 44_100;
 fn main() {
     let cli = Cli::parse();
 
-    let events = load_or_exit(smf::load(&cli.file));
+    let events = or_exit(smf::load(&cli.file));
     println!("Loaded {} events from {}", events.len(), cli.file.display());
 
     let soundfont = cli.soundfont.as_ref().map(|path| {
-        let sf = load_or_exit(soundfont::load(path));
+        let bank = or_exit(SoundFont::load(path));
         println!("Using soundfont {}", path.display());
-        sf
+        bank
     });
 
     if let Some(path) = cli.output {
         println!("Rendering to {}...", path.display());
-        let engine = engine::build(soundfont, SAMPLE_RATE);
+        let engine = or_exit(engine::build(soundfont, SAMPLE_RATE));
         let samples = render::render(&events, SAMPLE_RATE, engine);
         if let Err(e) = output::write(&path, &samples, SAMPLE_RATE) {
             eprintln!("error: {e}");
@@ -72,7 +72,7 @@ fn main() {
     }
 
     let total_s = total_seconds(&events);
-    let (_stream, tx) = audio::build_stream(soundfont);
+    let (_stream, tx) = or_exit(audio::build_stream(soundfont));
     let (_ctl_tx, ctl_rx) = mpsc::channel();
     println!("Playing...");
     sequencer::play(&events, &tx, total_s, cli.verbose, None, &ctl_rx);
@@ -81,7 +81,7 @@ fn main() {
     println!("Done.");
 }
 
-fn load_or_exit<T>(result: Result<T, Box<dyn std::error::Error>>) -> T {
+fn or_exit<T>(result: Result<T, Box<dyn std::error::Error>>) -> T {
     result.unwrap_or_else(|e| {
         eprintln!("error: {e}");
         std::process::exit(1);
@@ -92,12 +92,12 @@ fn total_seconds(events: &[smf::Event]) -> f64 {
     events.last().map(|e| e.time_s).unwrap_or(0.0) + TAIL_SECONDS
 }
 
-fn play_with_tui(events: Vec<smf::Event>, soundfont: Option<Arc<SoundFont>>, title: String) {
+fn play_with_tui(events: Vec<smf::Event>, soundfont: Option<SoundFont>, title: String) {
     let total_s = total_seconds(&events);
     let monitor = Arc::new(Mutex::new(Monitor::default()));
     let (ctl_tx, ctl_rx) = mpsc::channel();
 
-    let (_stream, tx) = audio::build_stream(soundfont);
+    let (_stream, tx) = or_exit(audio::build_stream(soundfont));
 
     let player_monitor = monitor.clone();
     let player = thread::spawn(move || {

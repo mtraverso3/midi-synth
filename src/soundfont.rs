@@ -2,101 +2,89 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 
-use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
+use rustysynth::{Synthesizer, SynthesizerSettings};
 
-use crate::engine::Engine;
-use crate::synth::SynthCommand;
+use crate::engine::{Command, Engine, write_frame};
 
-const CMD_PROGRAM_CHANGE: i32 = 0xC0;
-const CMD_CONTROL_CHANGE: i32 = 0xB0;
+const PROGRAM_CHANGE: i32 = 0xC0;
+const CONTROL_CHANGE: i32 = 0xB0;
 const CC_VOLUME: i32 = 7;
 const CC_SUSTAIN: i32 = 64;
 
 type Error = Box<dyn std::error::Error>;
 
-pub fn load(path: &Path) -> Result<Arc<SoundFont>, Error> {
-    let mut file = File::open(path)?;
-    Ok(Arc::new(SoundFont::new(&mut file)?))
+#[derive(Clone)]
+pub struct SoundFont(Arc<rustysynth::SoundFont>);
+
+impl SoundFont {
+    pub fn load(path: &Path) -> Result<Self, Error> {
+        let mut file = File::open(path)?;
+        Ok(Self(Arc::new(rustysynth::SoundFont::new(&mut file)?)))
+    }
 }
 
-/// Wraps a rustysynth [`Synthesizer`], which renders real instrument samples
-/// from the SoundFont in stereo blocks.
 pub struct SoundFontEngine {
     synth: Synthesizer,
     left: Vec<f32>,
     right: Vec<f32>,
-    paused: bool,
 }
 
 impl SoundFontEngine {
-    pub fn new(soundfont: Arc<SoundFont>, sample_rate: u32) -> Self {
+    pub fn new(bank: &SoundFont, sample_rate: u32) -> Result<Self, Error> {
         let settings = SynthesizerSettings::new(sample_rate as i32);
-        let synth = Synthesizer::new(&soundfont, &settings).expect("invalid synthesizer settings");
-        Self {
-            synth,
+        Ok(Self {
+            synth: Synthesizer::new(&bank.0, &settings)?,
             left: Vec::new(),
             right: Vec::new(),
-            paused: false,
-        }
+        })
+    }
+
+    fn midi(&mut self, channel: u8, status: i32, data1: i32, data2: i32) {
+        self.synth
+            .process_midi_message(channel as i32, status, data1, data2);
     }
 }
 
 impl Engine for SoundFontEngine {
-    fn handle(&mut self, command: SynthCommand) {
+    fn handle(&mut self, command: Command) {
         match command {
-            SynthCommand::NoteOn {
+            Command::NoteOn {
                 channel,
                 note,
                 velocity,
             } => self
                 .synth
                 .note_on(channel as i32, note as i32, velocity as i32),
-            SynthCommand::NoteOff { channel, note } => {
-                self.synth.note_off(channel as i32, note as i32)
+            Command::NoteOff { channel, note } => self.synth.note_off(channel as i32, note as i32),
+            Command::ProgramChange { channel, program } => {
+                self.midi(channel, PROGRAM_CHANGE, program as i32, 0)
             }
-            SynthCommand::ProgramChange { channel, program } => self.synth.process_midi_message(
-                channel as i32,
-                CMD_PROGRAM_CHANGE,
-                program as i32,
-                0,
-            ),
-            SynthCommand::Sustain { channel, on } => self.synth.process_midi_message(
-                channel as i32,
-                CMD_CONTROL_CHANGE,
+            Command::Sustain { channel, on } => self.midi(
+                channel,
+                CONTROL_CHANGE,
                 CC_SUSTAIN,
                 if on { 127 } else { 0 },
             ),
-            SynthCommand::SetVolume { channel, level } => self.synth.process_midi_message(
-                channel as i32,
-                CMD_CONTROL_CHANGE,
-                CC_VOLUME,
-                level as i32,
-            ),
-            SynthCommand::SetPaused(paused) => self.paused = paused,
-            SynthCommand::AllNotesOff => self.synth.note_off_all(true),
+            Command::SetVolume { channel, level } => {
+                self.midi(channel, CONTROL_CHANGE, CC_VOLUME, level as i32)
+            }
+            Command::AllNotesOff => self.synth.note_off_all(true),
+            // Intercepted by the pause gate in `engine`.
+            Command::SetPaused(_) => {}
         }
     }
 
     fn fill(&mut self, data: &mut [f32], channels: usize) {
-        if self.paused {
-            data.fill(0.0);
+        if channels == 0 {
             return;
         }
-        let frames = data.len() / channels.max(1);
+        let frames = data.len() / channels;
         self.left.resize(frames, 0.0);
         self.right.resize(frames, 0.0);
         self.synth.render(&mut self.left, &mut self.right);
 
         for (i, frame) in data.chunks_mut(channels).enumerate() {
-            match frame {
-                [mono] => *mono = 0.5 * (self.left[i] + self.right[i]),
-                [l, r, rest @ ..] => {
-                    *l = self.left[i];
-                    *r = self.right[i];
-                    rest.fill(self.left[i]);
-                }
-                [] => {}
-            }
+            write_frame(frame, self.left[i], self.right[i]);
         }
     }
 }

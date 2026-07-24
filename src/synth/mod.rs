@@ -7,44 +7,17 @@ mod voice;
 pub use instrument::family_name;
 use voice::Voice;
 
+use crate::engine::{Command, Engine, write_frame};
+
 const VOICE_COUNT: usize = 256;
 const CHANNEL_COUNT: usize = 16;
 const MASTER_GAIN: f32 = 0.3;
-
-pub enum SynthCommand {
-    NoteOn {
-        channel: u8,
-        note: u8,
-        velocity: u8,
-    },
-    NoteOff {
-        channel: u8,
-        note: u8,
-    },
-    ProgramChange {
-        channel: u8,
-        program: u8,
-    },
-    Sustain {
-        channel: u8,
-        on: bool,
-    },
-    SetVolume {
-        channel: u8,
-        level: u8,
-    },
-    /// Freeze/unfreeze the whole synth (for pause).
-    SetPaused(bool),
-    /// Immediately silence every voice (for seek).
-    AllNotesOff,
-}
 
 pub struct Synth {
     voices: Vec<Voice>,
     programs: [u8; CHANNEL_COUNT],
     sustain: [bool; CHANNEL_COUNT],
     volume: [f32; CHANNEL_COUNT],
-    paused: bool,
 }
 
 impl Synth {
@@ -54,57 +27,6 @@ impl Synth {
             programs: [0; CHANNEL_COUNT],
             sustain: [false; CHANNEL_COUNT],
             volume: [1.0; CHANNEL_COUNT],
-            paused: false,
-        }
-    }
-
-    pub fn handle(&mut self, command: SynthCommand) {
-        match command {
-            SynthCommand::NoteOn {
-                channel,
-                note,
-                velocity,
-            } => {
-                let program = self.programs[channel as usize];
-                let instrument = instrument::for_channel(channel, program);
-                self.allocate_voice()
-                    .note_on(channel, note, velocity, instrument);
-            }
-            SynthCommand::NoteOff { channel, note } => {
-                let held = self.sustain[channel as usize];
-                for voice in &mut self.voices {
-                    if voice.is_active() && voice.matches(channel, note) {
-                        if held {
-                            voice.hold();
-                        } else {
-                            voice.note_off();
-                        }
-                    }
-                }
-            }
-            SynthCommand::ProgramChange { channel, program } => {
-                self.programs[channel as usize] = program;
-            }
-            SynthCommand::Sustain { channel, on } => {
-                self.sustain[channel as usize] = on;
-                if !on {
-                    // Pedal up: release every voice it was holding on this channel.
-                    for voice in &mut self.voices {
-                        if voice.channel() == channel && voice.is_sustained() {
-                            voice.note_off();
-                        }
-                    }
-                }
-            }
-            SynthCommand::SetVolume { channel, level } => {
-                self.volume[channel as usize] = level as f32 / 127.0;
-            }
-            SynthCommand::SetPaused(paused) => self.paused = paused,
-            SynthCommand::AllNotesOff => {
-                for voice in &mut self.voices {
-                    voice.kill();
-                }
-            }
         }
     }
 
@@ -124,12 +46,7 @@ impl Synth {
         &mut self.voices[index]
     }
 
-    pub fn next_sample(&mut self) -> f32 {
-        // While paused, hold silence and don't advance any voice, so notes that
-        // were sounding resume seamlessly.
-        if self.paused {
-            return 0.0;
-        }
+    fn next_sample(&mut self) -> f32 {
         let volume = &self.volume;
         let mixed: f32 = self
             .voices
@@ -138,5 +55,65 @@ impl Synth {
             .map(|v| v.next_sample() * volume[v.channel() as usize])
             .sum();
         (mixed * MASTER_GAIN).clamp(-1.0, 1.0)
+    }
+}
+
+impl Engine for Synth {
+    fn handle(&mut self, command: Command) {
+        match command {
+            Command::NoteOn {
+                channel,
+                note,
+                velocity,
+            } => {
+                let program = self.programs[channel as usize];
+                let instrument = instrument::for_channel(channel, program);
+                self.allocate_voice()
+                    .note_on(channel, note, velocity, instrument);
+            }
+            Command::NoteOff { channel, note } => {
+                let held = self.sustain[channel as usize];
+                for voice in &mut self.voices {
+                    if voice.is_active() && voice.matches(channel, note) {
+                        if held {
+                            voice.hold();
+                        } else {
+                            voice.note_off();
+                        }
+                    }
+                }
+            }
+            Command::ProgramChange { channel, program } => {
+                self.programs[channel as usize] = program;
+            }
+            Command::Sustain { channel, on } => {
+                self.sustain[channel as usize] = on;
+                if !on {
+                    // Pedal up: release every voice it was holding on this channel.
+                    for voice in &mut self.voices {
+                        if voice.channel() == channel && voice.is_sustained() {
+                            voice.note_off();
+                        }
+                    }
+                }
+            }
+            Command::SetVolume { channel, level } => {
+                self.volume[channel as usize] = level as f32 / 127.0;
+            }
+            // Intercepted by the pause gate in `engine`.
+            Command::SetPaused(_) => {}
+            Command::AllNotesOff => {
+                for voice in &mut self.voices {
+                    voice.kill();
+                }
+            }
+        }
+    }
+
+    fn fill(&mut self, data: &mut [f32], channels: usize) {
+        for frame in data.chunks_mut(channels) {
+            let sample = self.next_sample();
+            write_frame(frame, sample, sample);
+        }
     }
 }
