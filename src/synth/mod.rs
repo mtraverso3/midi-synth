@@ -16,7 +16,7 @@ use crate::engine::{Command, Engine, write_frame};
 
 const VOICE_COUNT: usize = 8192;
 const CHANNEL_COUNT: usize = 16;
-const MASTER_GAIN: f32 = 0.3;
+const MASTER_GAIN: f32 = 0.42;
 /// Vibrato that full polyphonic key pressure adds to a single note.
 const POLY_PRESSURE_DEPTH: f32 = 0.02;
 /// How much reverb is folded back in; enough to place the notes in a room.

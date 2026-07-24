@@ -143,8 +143,11 @@ impl Voice {
         self.age = 0;
         self.filter_countdown = 0;
 
-        let velocity = velocity as f32 / 127.0;
-        self.amplitude = velocity * (1.0 + self.rng.next_bipolar() * LEVEL_JITTER);
+        let velocity = f32::from(velocity) / 127.0;
+        // Velocity sets attenuation rather than amplitude, the square law the
+        // SoundFont and DLS specs use. Mapping it straight to amplitude leaves
+        // moderate notes far too close to hard ones and flattens the dynamics.
+        self.amplitude = velocity * velocity * (1.0 + self.rng.next_bipolar() * LEVEL_JITTER);
 
         // Percussion tunes itself: the note picked the sound, not the pitch.
         self.frequency = instrument.fixed_pitch.unwrap_or_else(|| note_to_freq(note));
