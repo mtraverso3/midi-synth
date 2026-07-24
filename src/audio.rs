@@ -8,7 +8,10 @@ use midi::soundfont::SoundFont;
 
 type Error = Box<dyn std::error::Error>;
 
-pub fn build_stream(soundfont: Option<SoundFont>) -> Result<(Stream, Sender<Command>), Error> {
+pub fn build_stream(
+    soundfont: Option<SoundFont>,
+    gain: f32,
+) -> Result<(Stream, Sender<Command>), Error> {
     let host = cpal::default_host();
     let device = host
         .default_output_device()
@@ -25,9 +28,9 @@ pub fn build_stream(soundfont: Option<SoundFont>) -> Result<(Stream, Sender<Comm
     let (tx, rx) = channel();
 
     let stream = match sample_format {
-        SampleFormat::F32 => run::<f32>(&device, config, rx, soundfont)?,
-        SampleFormat::I16 => run::<i16>(&device, config, rx, soundfont)?,
-        SampleFormat::U16 => run::<u16>(&device, config, rx, soundfont)?,
+        SampleFormat::F32 => run::<f32>(&device, config, rx, soundfont, gain)?,
+        SampleFormat::I16 => run::<i16>(&device, config, rx, soundfont, gain)?,
+        SampleFormat::U16 => run::<u16>(&device, config, rx, soundfont, gain)?,
         other => panic!("Unsupported sample format '{other}'"),
     };
 
@@ -39,12 +42,13 @@ fn run<T>(
     config: cpal::StreamConfig,
     rx: Receiver<Command>,
     soundfont: Option<SoundFont>,
+    gain: f32,
 ) -> Result<Stream, Error>
 where
     T: Sample + SizedSample + FromSample<f32>,
 {
     let channels = config.channels as usize;
-    let mut engine = engine::build(soundfont, config.sample_rate)?;
+    let mut engine = engine::build(soundfont, config.sample_rate, gain)?;
     let mut scratch: Vec<f32> = Vec::new();
 
     let err_fn = |err| eprintln!("audio stream error: {err}");

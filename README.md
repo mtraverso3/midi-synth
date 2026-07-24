@@ -21,8 +21,16 @@ cargo run -- song.mid --tui      # play with a live terminal visualizer
 cargo run -- song.mid -o out.mp3 # render to out.mp3 (or out.wav)
 cargo run -- song.mid -v         # print each note event as it plays
 cargo run -- song.mid -s gm.sf2  # play through a SoundFont
+cargo run -- song.mid -g -6      # trim the output by 6 dB
 cargo run -- --help
 ```
+
+### Levels
+
+The master bus ends in a look-ahead limiter, so polyphony sets the density of
+the music rather than its volume: a dense passage is turned down as a whole
+instead of clipping, and the output stays under -0.4 dBFS whether one note is
+sounding or two hundred. `-g`/`--gain` trims the level going into it.
 
 ### Instruments
 

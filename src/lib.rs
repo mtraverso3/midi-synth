@@ -1,4 +1,5 @@
 pub mod engine;
+pub mod limiter;
 pub mod render;
 pub mod sequencer;
 pub mod smf;

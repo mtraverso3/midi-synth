@@ -17,8 +17,6 @@ const CHANNEL_COUNT: usize = 16;
 const MASTER_GAIN: f32 = 0.3;
 /// How much reverb is folded back in; enough to place the notes in a room.
 const REVERB_MIX: f32 = 0.22;
-/// Level above which the mix saturates instead of hard-clipping.
-const LIMIT_THRESHOLD: f32 = 0.7;
 
 pub struct Synth {
     voices: Vec<Voice>,
@@ -67,10 +65,7 @@ impl Synth {
             .sum();
         let dry = dry * MASTER_GAIN;
         let (left, right) = self.reverb.process(dry);
-        (
-            soft_clip(dry + left * REVERB_MIX),
-            soft_clip(dry + right * REVERB_MIX),
-        )
+        (dry + left * REVERB_MIX, dry + right * REVERB_MIX)
     }
 }
 
@@ -132,15 +127,4 @@ impl Engine for Synth {
             write_frame(frame, left, right);
         }
     }
-}
-
-/// Dense passages otherwise slam into the ceiling, and a hard clamp there is
-/// audible as distortion. Below the threshold this is exactly unity.
-fn soft_clip(sample: f32) -> f32 {
-    let magnitude = sample.abs();
-    if magnitude <= LIMIT_THRESHOLD {
-        return sample;
-    }
-    let excess = (magnitude - LIMIT_THRESHOLD) / (1.0 - LIMIT_THRESHOLD);
-    sample.signum() * (LIMIT_THRESHOLD + (1.0 - LIMIT_THRESHOLD) * excess.tanh())
 }

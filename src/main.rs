@@ -37,6 +37,10 @@ struct Cli {
     /// Render to an audio file (.wav or .mp3) instead of playing live.
     #[arg(short, long)]
     output: Option<PathBuf>,
+
+    /// Output gain in decibels, before the limiter.
+    #[arg(short, long, default_value_t = 0.0, allow_negative_numbers = true)]
+    gain: f32,
 }
 
 const SAMPLE_RATE: u32 = 44_100;
@@ -53,9 +57,11 @@ fn main() {
         bank
     });
 
+    let gain = decibels(cli.gain);
+
     if let Some(path) = cli.output {
         println!("Rendering to {}...", path.display());
-        let engine = or_exit(engine::build(soundfont, SAMPLE_RATE));
+        let engine = or_exit(engine::build(soundfont, SAMPLE_RATE, gain));
         let samples = render::render(&events, SAMPLE_RATE, engine);
         if let Err(e) = output::write(&path, &samples, SAMPLE_RATE) {
             eprintln!("error: {e}");
@@ -67,12 +73,12 @@ fn main() {
 
     if cli.tui {
         let title = cli.file.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        play_with_tui(events, soundfont, title.to_string());
+        play_with_tui(events, soundfont, title.to_string(), gain);
         return;
     }
 
     let total_s = total_seconds(&events);
-    let (_stream, tx) = or_exit(audio::build_stream(soundfont));
+    let (_stream, tx) = or_exit(audio::build_stream(soundfont, gain));
     let (_ctl_tx, ctl_rx) = mpsc::channel();
     println!("Playing...");
     sequencer::play(&events, &tx, total_s, cli.verbose, None, &ctl_rx);
@@ -88,16 +94,20 @@ fn or_exit<T>(result: Result<T, Box<dyn std::error::Error>>) -> T {
     })
 }
 
+fn decibels(db: f32) -> f32 {
+    10.0f32.powf(db / 20.0)
+}
+
 fn total_seconds(events: &[smf::Event]) -> f64 {
     events.last().map(|e| e.time_s).unwrap_or(0.0) + TAIL_SECONDS
 }
 
-fn play_with_tui(events: Vec<smf::Event>, soundfont: Option<SoundFont>, title: String) {
+fn play_with_tui(events: Vec<smf::Event>, soundfont: Option<SoundFont>, title: String, gain: f32) {
     let total_s = total_seconds(&events);
     let monitor = Arc::new(Mutex::new(Monitor::default()));
     let (ctl_tx, ctl_rx) = mpsc::channel();
 
-    let (_stream, tx) = or_exit(audio::build_stream(soundfont));
+    let (_stream, tx) = or_exit(audio::build_stream(soundfont, gain));
 
     let player_monitor = monitor.clone();
     let player = thread::spawn(move || {

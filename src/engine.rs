@@ -1,3 +1,4 @@
+use crate::limiter::Limiter;
 use crate::soundfont::{SoundFont, SoundFontEngine};
 use crate::synth::Synth;
 
@@ -19,15 +20,48 @@ pub trait Engine: Send {
     fn fill(&mut self, data: &mut [f32], channels: usize);
 }
 
-pub fn build(soundfont: Option<SoundFont>, sample_rate: u32) -> Result<Box<dyn Engine>, Error> {
+pub fn build(
+    soundfont: Option<SoundFont>,
+    sample_rate: u32,
+    gain: f32,
+) -> Result<Box<dyn Engine>, Error> {
     let source: Box<dyn Engine> = match soundfont {
         Some(bank) => Box::new(SoundFontEngine::new(&bank, sample_rate)?),
         None => Box::new(Synth::new(sample_rate as f32)),
     };
-    Ok(Box::new(Paused {
+    let master = Master {
         source,
+        gain,
+        limiter: Limiter::new(sample_rate),
+    };
+    Ok(Box::new(Paused {
+        source: Box::new(master),
         paused: false,
     }))
+}
+
+/// Master bus: the listener's gain trim, then the limiter that keeps dense
+/// music under the ceiling. Both engines pass through it.
+struct Master {
+    source: Box<dyn Engine>,
+    gain: f32,
+    limiter: Limiter,
+}
+
+impl Engine for Master {
+    fn handle(&mut self, command: Command) {
+        self.source.handle(command);
+    }
+
+    fn fill(&mut self, data: &mut [f32], channels: usize) {
+        self.source.fill(data, channels);
+        if self.gain != 1.0 {
+            for sample in data.iter_mut() {
+                *sample *= self.gain;
+            }
+        }
+        self.limiter.process(data, channels);
+    }
 }
 
 pub(crate) fn write_frame(frame: &mut [f32], left: f32, right: f32) {
