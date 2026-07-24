@@ -5,29 +5,7 @@ pub enum Waveform {
     Saw,
     Square,
     Triangle,
-}
-
-impl Waveform {
-    fn sample(self, phase: f32) -> f32 {
-        match self {
-            Waveform::Sine => (phase * std::f32::consts::TAU).sin(),
-            Waveform::Saw => 2.0 * phase - 1.0,
-            Waveform::Square => {
-                if phase < 0.5 {
-                    1.0
-                } else {
-                    -1.0
-                }
-            }
-            Waveform::Triangle => {
-                if phase < 0.5 {
-                    4.0 * phase - 1.0
-                } else {
-                    3.0 - 4.0 * phase
-                }
-            }
-        }
-    }
+    Noise,
 }
 
 pub struct Oscillator {
@@ -35,6 +13,7 @@ pub struct Oscillator {
     waveform: Waveform,
     phase: f32,
     phase_step: f32,
+    rng: u32,
 }
 
 impl Oscillator {
@@ -44,6 +23,7 @@ impl Oscillator {
             waveform,
             phase: 0.0,
             phase_step: 0.0,
+            rng: 0x2545_f491,
         }
     }
 
@@ -56,8 +36,34 @@ impl Oscillator {
     }
 
     pub fn next_sample(&mut self) -> f32 {
-        let value = self.waveform.sample(self.phase);
+        let value = match self.waveform {
+            Waveform::Sine => (self.phase * std::f32::consts::TAU).sin(),
+            Waveform::Saw => 2.0 * self.phase - 1.0,
+            Waveform::Square => {
+                if self.phase < 0.5 {
+                    1.0
+                } else {
+                    -1.0
+                }
+            }
+            Waveform::Triangle => {
+                if self.phase < 0.5 {
+                    4.0 * self.phase - 1.0
+                } else {
+                    3.0 - 4.0 * self.phase
+                }
+            }
+            Waveform::Noise => self.next_noise(),
+        };
         self.phase = (self.phase + self.phase_step).fract();
         value
+    }
+
+    /// White noise via a fast xorshift PRNG mapped to -1.0..1.0.
+    fn next_noise(&mut self) -> f32 {
+        self.rng ^= self.rng << 13;
+        self.rng ^= self.rng >> 17;
+        self.rng ^= self.rng << 5;
+        (self.rng as f32 / u32::MAX as f32) * 2.0 - 1.0
     }
 }

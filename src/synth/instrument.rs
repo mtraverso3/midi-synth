@@ -37,7 +37,7 @@ const SUSTAINED: fn(Waveform) -> Instrument = |waveform| Instrument {
 pub fn for_channel(channel: u8, program: u8) -> Instrument {
     if channel == DRUM_CHANNEL {
         return Instrument {
-            waveform: Waveform::Square,
+            waveform: Waveform::Noise,
             attack_s: 0.001,
             decay_s: 0.12,
             sustain_level: 0.0,

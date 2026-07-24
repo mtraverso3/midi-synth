@@ -23,9 +23,19 @@ fn main() {
     let mut pad = Vec::new();
     let mut bass = Vec::new();
     let mut lead = Vec::new();
+    let mut drums = Vec::new();
 
     for (bar, chord) in chords.iter().enumerate() {
         let bar_start = bar as u32 * BAR;
+
+        // Drums (noise bursts; pitch is ignored): kick on 1 & 3, snare on 2 & 4,
+        // hi-hats every half beat.
+        for beat in 0..4 {
+            let t = bar_start + beat * BEAT;
+            let drum = if beat % 2 == 0 { 36 } else { 38 };
+            drums.push((t, BEAT / 4, drum));
+            drums.push((t + BEAT / 2, BEAT / 4, 42));
+        }
 
         // Pad: whole-note chord held across the bar.
         for &note in chord {
@@ -51,6 +61,7 @@ fn main() {
             build_track(0, 48, &lead), // strings -> saw
             build_track(1, 0, &pad),   // piano   -> triangle
             build_track(2, 18, &bass), // organ   -> sine
+            build_track(9, 0, &drums), // channel 9 -> noise percussion
         ],
     };
 
