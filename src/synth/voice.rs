@@ -12,6 +12,14 @@ const DETUNE_MIX: f32 = 0.4;
 const DETUNE_JITTER: f32 = 0.0015;
 const LEVEL_JITTER: f32 = 0.08;
 
+/// The filter envelope moves over tenths of a second, so recomputing the
+/// coefficient every sample is wasted work; this is inaudible and much cheaper.
+const FILTER_UPDATE_INTERVAL: u32 = 32;
+
+/// How long a note must have been sounding before it is a fair candidate for
+/// voice stealing.
+const ESTABLISHED_MS: f32 = 40.0;
+
 const VIBRATO_HZ: f32 = 5.2;
 /// Players ease vibrato in rather than starting a note with it.
 const VIBRATO_ONSET_S: f32 = 0.35;
@@ -29,6 +37,9 @@ pub struct Voice {
     rng: Rng,
     channel: u8,
     note: Option<u8>,
+    age: u32,
+    established_after: u32,
+    filter_countdown: u32,
     frequency: f32,
     detune_ratio: f32,
     amplitude: f32,
@@ -61,6 +72,9 @@ impl Voice {
             rng: Rng::new(seed),
             channel: 0,
             note: None,
+            age: 0,
+            established_after: (ESTABLISHED_MS / 1000.0 * sample_rate) as u32,
+            filter_countdown: 0,
             frequency: 440.0,
             detune_ratio: DETUNE,
             amplitude: 0.0,
@@ -80,6 +94,16 @@ impl Voice {
 
     pub fn is_active(&self) -> bool {
         !self.envelope.is_finished()
+    }
+
+    /// Samples since this voice was last started.
+    pub fn age(&self) -> u32 {
+        self.age
+    }
+
+    /// Whether the note has been sounding long enough to be worth protecting.
+    pub fn is_established(&self) -> bool {
+        self.age >= self.established_after
     }
 
     pub fn channel(&self) -> u8 {
@@ -107,6 +131,8 @@ impl Voice {
         self.channel = channel;
         self.note = Some(note);
         self.sustained = false;
+        self.age = 0;
+        self.filter_countdown = 0;
 
         let velocity = velocity as f32 / 127.0;
         self.amplitude = velocity * (1.0 + self.rng.next_bipolar() * LEVEL_JITTER);
@@ -173,6 +199,7 @@ impl Voice {
     }
 
     pub fn next_sample(&mut self) -> f32 {
+        self.age = self.age.saturating_add(1);
         let vibrato = if self.vibrato_depth > 0.0 {
             self.vibrato_age_s += 1.0 / self.sample_rate;
             let onset = (self.vibrato_age_s / VIBRATO_ONSET_S).min(1.0);
@@ -192,8 +219,13 @@ impl Voice {
         let transient = noise * self.transient.next_sample() * self.transient_level;
 
         // The filter envelope closes over the note, so it starts bright and darkens.
-        self.filter
-            .set_cutoff(self.cutoff_hz + self.cutoff_range_hz * self.filter_envelope.next_sample());
+        let brightness = self.filter_envelope.next_sample();
+        if self.filter_countdown == 0 {
+            self.filter
+                .set_cutoff(self.cutoff_hz + self.cutoff_range_hz * brightness);
+            self.filter_countdown = FILTER_UPDATE_INTERVAL;
+        }
+        self.filter_countdown -= 1;
         let filtered = self.filter.process(tone + transient);
 
         self.body_level *= self.body_decay;
