@@ -22,24 +22,27 @@ pub fn play(events: &[Event], tx: &Sender<SynthCommand>, verbose: bool) {
             log_event(event, start.elapsed().as_secs_f64());
         }
 
-        let command = match event.kind {
-            EventKind::NoteOn { note, velocity } => SynthCommand::NoteOn {
-                channel: event.channel,
-                note,
-                velocity,
-            },
-            EventKind::NoteOff { note } => SynthCommand::NoteOff {
-                channel: event.channel,
-                note,
-            },
-            EventKind::ProgramChange { program } => SynthCommand::ProgramChange {
-                channel: event.channel,
-                program,
-            },
-        };
-        if tx.send(command).is_err() {
+        if tx.send(to_command(event)).is_err() {
             return;
         }
+    }
+}
+
+pub fn to_command(event: &Event) -> SynthCommand {
+    match event.kind {
+        EventKind::NoteOn { note, velocity } => SynthCommand::NoteOn {
+            channel: event.channel,
+            note,
+            velocity,
+        },
+        EventKind::NoteOff { note } => SynthCommand::NoteOff {
+            channel: event.channel,
+            note,
+        },
+        EventKind::ProgramChange { program } => SynthCommand::ProgramChange {
+            channel: event.channel,
+            program,
+        },
     }
 }
 
