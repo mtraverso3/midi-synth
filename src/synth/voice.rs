@@ -15,6 +15,8 @@ pub struct Voice {
     channel: u8,
     note: Option<u8>,
     amplitude: f32,
+    /// Note-off arrived but the sustain pedal is holding this voice.
+    sustained: bool,
 }
 
 impl Voice {
@@ -28,11 +30,24 @@ impl Voice {
             channel: 0,
             note: None,
             amplitude: 0.0,
+            sustained: false,
         }
     }
 
     pub fn is_active(&self) -> bool {
         !self.envelope.is_finished()
+    }
+
+    pub fn channel(&self) -> u8 {
+        self.channel
+    }
+
+    pub fn is_sustained(&self) -> bool {
+        self.sustained
+    }
+
+    pub fn hold(&mut self) {
+        self.sustained = true;
     }
 
     /// Current loudness (0.0..1.0), used to steal the quietest voice.
@@ -48,6 +63,7 @@ impl Voice {
         self.channel = channel;
         self.note = Some(note);
         self.amplitude = velocity as f32 / 127.0;
+        self.sustained = false;
 
         let freq = note_to_freq(note);
         self.oscillator.set_waveform(instrument.waveform);
@@ -73,6 +89,7 @@ impl Voice {
     pub fn kill(&mut self) {
         self.envelope.reset();
         self.note = None;
+        self.sustained = false;
     }
 
     pub fn next_sample(&mut self) -> f32 {

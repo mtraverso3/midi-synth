@@ -105,7 +105,8 @@ pub fn play(
 }
 
 /// Jump the synth to `song_time`: silence held notes, then rebuild per-channel
-/// program state from the events before the target and rewind the event cursor.
+/// state (program, volume, sustain) from the events before the target and
+/// rewind the event cursor.
 fn seek(
     events: &[Event],
     tx: &Sender<SynthCommand>,
@@ -116,7 +117,10 @@ fn seek(
 
     let index = events.partition_point(|e| e.time_s < song_time);
     for event in &events[..index] {
-        if let EventKind::ProgramChange { .. } = event.kind {
+        if matches!(
+            event.kind,
+            EventKind::ProgramChange { .. } | EventKind::Volume { .. } | EventKind::Sustain { .. }
+        ) {
             let _ = tx.send(to_command(event));
         }
     }
@@ -140,6 +144,7 @@ fn update_monitor(monitor: &SharedMonitor, event: &Event) {
         }
         EventKind::NoteOff { note } => m.active[ch] &= !(1 << note),
         EventKind::ProgramChange { program } => m.programs[ch] = program,
+        EventKind::Sustain { .. } | EventKind::Volume { .. } => {}
     }
 }
 
@@ -158,6 +163,14 @@ pub fn to_command(event: &Event) -> SynthCommand {
             channel: event.channel,
             program,
         },
+        EventKind::Sustain { on } => SynthCommand::Sustain {
+            channel: event.channel,
+            on,
+        },
+        EventKind::Volume { level } => SynthCommand::SetVolume {
+            channel: event.channel,
+            level,
+        },
     }
 }
 
@@ -175,6 +188,13 @@ fn log_event(event: &Event, now: f64) {
         EventKind::ProgramChange { program } => {
             println!("[{now:7.3}s] ch{ch:2} program   {program}")
         }
+        EventKind::Sustain { on } => {
+            println!(
+                "[{now:7.3}s] ch{ch:2} sustain   {}",
+                if on { "on" } else { "off" }
+            )
+        }
+        EventKind::Volume { level } => println!("[{now:7.3}s] ch{ch:2} volume    {level}"),
     }
 }
 

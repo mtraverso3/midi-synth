@@ -7,7 +7,12 @@ pub enum EventKind {
     NoteOn { note: u8, velocity: u8 },
     NoteOff { note: u8 },
     ProgramChange { program: u8 },
+    Sustain { on: bool },
+    Volume { level: u8 },
 }
+
+const CC_VOLUME: u8 = 7;
+const CC_SUSTAIN: u8 = 64;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Event {
@@ -78,6 +83,15 @@ pub fn load(path: impl AsRef<Path>) -> Result<Vec<Event>, Box<dyn std::error::Er
             MidiMessage::NoteOff { key, .. } => EventKind::NoteOff { note: key.as_int() },
             MidiMessage::ProgramChange { program } => EventKind::ProgramChange {
                 program: program.as_int(),
+            },
+            MidiMessage::Controller { controller, value } => match controller.as_int() {
+                CC_SUSTAIN => EventKind::Sustain {
+                    on: value.as_int() >= 64,
+                },
+                CC_VOLUME => EventKind::Volume {
+                    level: value.as_int(),
+                },
+                _ => continue,
             },
             _ => continue,
         };

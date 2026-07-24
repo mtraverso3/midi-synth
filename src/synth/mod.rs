@@ -25,6 +25,14 @@ pub enum SynthCommand {
         channel: u8,
         program: u8,
     },
+    Sustain {
+        channel: u8,
+        on: bool,
+    },
+    SetVolume {
+        channel: u8,
+        level: u8,
+    },
     /// Freeze/unfreeze the whole synth (for pause).
     SetPaused(bool),
     /// Immediately silence every voice (for seek).
@@ -34,6 +42,8 @@ pub enum SynthCommand {
 pub struct Synth {
     voices: Vec<Voice>,
     programs: [u8; CHANNEL_COUNT],
+    sustain: [bool; CHANNEL_COUNT],
+    volume: [f32; CHANNEL_COUNT],
     paused: bool,
 }
 
@@ -42,6 +52,8 @@ impl Synth {
         Self {
             voices: (0..VOICE_COUNT).map(|_| Voice::new(sample_rate)).collect(),
             programs: [0; CHANNEL_COUNT],
+            sustain: [false; CHANNEL_COUNT],
+            volume: [1.0; CHANNEL_COUNT],
             paused: false,
         }
     }
@@ -59,14 +71,33 @@ impl Synth {
                     .note_on(channel, note, velocity, instrument);
             }
             SynthCommand::NoteOff { channel, note } => {
+                let held = self.sustain[channel as usize];
                 for voice in &mut self.voices {
                     if voice.is_active() && voice.matches(channel, note) {
-                        voice.note_off();
+                        if held {
+                            voice.hold();
+                        } else {
+                            voice.note_off();
+                        }
                     }
                 }
             }
             SynthCommand::ProgramChange { channel, program } => {
                 self.programs[channel as usize] = program;
+            }
+            SynthCommand::Sustain { channel, on } => {
+                self.sustain[channel as usize] = on;
+                if !on {
+                    // Pedal up: release every voice it was holding on this channel.
+                    for voice in &mut self.voices {
+                        if voice.channel() == channel && voice.is_sustained() {
+                            voice.note_off();
+                        }
+                    }
+                }
+            }
+            SynthCommand::SetVolume { channel, level } => {
+                self.volume[channel as usize] = level as f32 / 127.0;
             }
             SynthCommand::SetPaused(paused) => self.paused = paused,
             SynthCommand::AllNotesOff => {
@@ -99,11 +130,12 @@ impl Synth {
         if self.paused {
             return 0.0;
         }
+        let volume = &self.volume;
         let mixed: f32 = self
             .voices
             .iter_mut()
             .filter(|v| v.is_active())
-            .map(|v| v.next_sample())
+            .map(|v| v.next_sample() * volume[v.channel() as usize])
             .sum();
         (mixed * MASTER_GAIN).clamp(-1.0, 1.0)
     }
