@@ -7,14 +7,17 @@ enum Stage {
     Release,
 }
 
+/// How close to a target level counts as "arrived", ending a stage.
+const EPSILON: f32 = 0.001;
+
 pub struct Envelope {
     sample_rate: f32,
     stage: Stage,
     level: f32,
-    attack_rate: f32,
-    decay_rate: f32,
+    attack_coeff: f32,
+    decay_coeff: f32,
     sustain_level: f32,
-    release_rate: f32,
+    release_coeff: f32,
 }
 
 impl Envelope {
@@ -23,25 +26,27 @@ impl Envelope {
             sample_rate,
             stage: Stage::Idle,
             level: 0.0,
-            attack_rate: 1.0,
-            decay_rate: 1.0,
+            attack_coeff: 1.0,
+            decay_coeff: 1.0,
             sustain_level: 1.0,
-            release_rate: 1.0,
+            release_coeff: 1.0,
         }
     }
 
     pub fn configure(&mut self, attack_s: f32, decay_s: f32, sustain_level: f32, release_s: f32) {
-        let per_sample = |seconds: f32| {
+        // One-pole smoothing coefficient: each sample moves this fraction of the
+        // remaining distance to the target, giving an exponential curve.
+        let coeff = |seconds: f32| {
             if seconds <= 0.0 {
                 1.0
             } else {
-                1.0 / (seconds * self.sample_rate)
+                1.0 - (-1.0 / (seconds * self.sample_rate)).exp()
             }
         };
-        self.attack_rate = per_sample(attack_s);
-        self.decay_rate = per_sample(decay_s);
+        self.attack_coeff = coeff(attack_s);
+        self.decay_coeff = coeff(decay_s);
         self.sustain_level = sustain_level;
-        self.release_rate = per_sample(release_s);
+        self.release_coeff = coeff(release_s);
     }
 
     pub fn trigger(&mut self) {
@@ -60,23 +65,26 @@ impl Envelope {
         match self.stage {
             Stage::Idle => self.level = 0.0,
             Stage::Attack => {
-                self.level += self.attack_rate;
-                if self.level >= 1.0 {
+                self.level += (1.0 - self.level) * self.attack_coeff;
+                if self.level >= 1.0 - EPSILON {
                     self.level = 1.0;
                     self.stage = Stage::Decay;
                 }
             }
             Stage::Decay => {
-                self.level -= self.decay_rate;
-                if self.level <= self.sustain_level {
+                self.level += (self.sustain_level - self.level) * self.decay_coeff;
+                if (self.level - self.sustain_level).abs() < EPSILON {
                     self.level = self.sustain_level;
                     self.stage = Stage::Sustain;
                 }
             }
+            // A note whose sustain is silence (plucked/percussive) has fully
+            // faded, so free the voice instead of holding at zero forever.
+            Stage::Sustain if self.sustain_level < EPSILON => self.stage = Stage::Idle,
             Stage::Sustain => self.level = self.sustain_level,
             Stage::Release => {
-                self.level -= self.release_rate;
-                if self.level <= 0.0 {
+                self.level -= self.level * self.release_coeff;
+                if self.level < EPSILON {
                     self.level = 0.0;
                     self.stage = Stage::Idle;
                 }
