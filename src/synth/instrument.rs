@@ -155,7 +155,35 @@ pub fn for_channel(channel: u8, program: u8) -> Instrument {
             transient: 0.2,
             ..SUSTAINED(Waveform::Saw)
         }, // brass
-        64..=71 => SUSTAINED(Waveform::Square), // reeds
+        64..=67 => Instrument {
+            attack_s: 0.045,
+            sustain_level: 0.8,
+            cutoff_ratio: 2.0,
+            brightness: 2.5,
+            brightness_decay_s: 0.35,
+            transient: 0.3,
+            transient_s: 0.06,
+            vibrato_depth: 0.005,
+            ..SUSTAINED(Waveform::Saw)
+        }, // saxophones: reeds are dominated by their low harmonics
+        68..=70 => Instrument {
+            attack_s: 0.04,
+            cutoff_ratio: 1.8,
+            brightness: 3.0,
+            brightness_decay_s: 0.3,
+            transient: 0.25,
+            ..SUSTAINED(Waveform::Saw)
+        }, // oboe, english horn, bassoon
+        71 => Instrument {
+            attack_s: 0.05,
+            cutoff_ratio: 1.5,
+            brightness: 1.5,
+            brightness_decay_s: 0.4,
+            transient: 0.2,
+            transient_s: 0.07,
+            vibrato_depth: 0.002,
+            ..SUSTAINED(Waveform::Square)
+        }, // clarinet: hollow, odd harmonics only
         72..=79 => Instrument {
             brightness: 4.0,
             transient: 0.3,
