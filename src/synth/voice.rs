@@ -44,8 +44,12 @@ pub struct Voice {
     frequency: f32,
     detune_ratio: f32,
     amplitude: f32,
-    /// Note-off arrived but the sustain pedal is holding this voice.
+    /// Note-off arrived but a pedal is holding this voice, and the release
+    /// scale that note-off asked for.
     sustained: bool,
+    held_release: f32,
+    /// Captured by the sostenuto pedal, which holds only what was already down.
+    sostenuto: bool,
     /// Polyphonic aftertouch for this note alone.
     pressure: f32,
     transient_level: f32,
@@ -83,6 +87,8 @@ impl Voice {
             detune_ratio: DETUNE,
             amplitude: 0.0,
             sustained: false,
+            held_release: 1.0,
+            sostenuto: false,
             pressure: 0.0,
             transient_level: 0.0,
             vibrato_depth: 0.0,
@@ -115,12 +121,39 @@ impl Voice {
         self.channel
     }
 
+    #[cfg(test)]
+    pub fn note(&self) -> Option<u8> {
+        self.note
+    }
+
     pub fn is_sustained(&self) -> bool {
         self.sustained
     }
 
-    pub fn hold(&mut self) {
+    pub fn is_sostenuto(&self) -> bool {
+        self.sostenuto
+    }
+
+    /// Note-off arrived while a pedal was down; remember how it wanted to end.
+    pub fn hold(&mut self, scale: f32) {
         self.sustained = true;
+        self.held_release = scale;
+    }
+
+    /// Capture this voice under the sostenuto pedal, if it is still being played.
+    pub fn capture(&mut self) {
+        if !self.sustained {
+            self.sostenuto = true;
+        }
+    }
+
+    pub fn free_sostenuto(&mut self) {
+        self.sostenuto = false;
+    }
+
+    /// Let go of a voice a pedal was holding, at the release its note-off asked for.
+    pub fn release_held(&mut self) {
+        self.note_off(self.held_release);
     }
 
     /// Polyphonic key pressure, which leans on this note's vibrato alone.
@@ -141,6 +174,8 @@ impl Voice {
         self.channel = channel;
         self.note = Some(note);
         self.sustained = false;
+        self.held_release = 1.0;
+        self.sostenuto = false;
         self.pressure = 0.0;
         self.age = 0;
         self.filter_countdown = 0;
@@ -217,6 +252,7 @@ impl Voice {
         self.filter.reset();
         self.note = None;
         self.sustained = false;
+        self.sostenuto = false;
     }
 
     /// `pitch_scale` is the channel's pitch bend, `modulation` the extra vibrato

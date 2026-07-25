@@ -27,24 +27,30 @@ impl Monitor {
     /// Fold one event into the snapshot's note/program state.
     pub fn apply(&mut self, event: &Event) {
         let ch = event.channel as usize;
-        self.seen |= 1 << ch;
         match event.kind {
             EventKind::NoteOn { note, .. } => {
+                self.seen |= 1 << ch;
                 self.active[ch] |= 1 << note;
                 self.notes_played += 1;
             }
             EventKind::NoteOff { note, .. } => self.active[ch] &= !(1 << note),
-            EventKind::ProgramChange { program } => self.programs[ch] = program,
+            EventKind::ProgramChange { program } => {
+                self.seen |= 1 << ch;
+                self.programs[ch] = program;
+            }
             EventKind::Controller { controller, .. }
                 if crate::midi::is_channel_mode(controller) =>
             {
                 self.active[ch] = 0;
             }
             EventKind::GeneralMidiReset => {
-                self.active[ch] = 0;
+                self.active = [0; 16];
+                self.programs = [0; 16];
             }
             EventKind::Controller { .. }
             | EventKind::MasterVolume { .. }
+            | EventKind::MasterBalance { .. }
+            | EventKind::MasterTuning { .. }
             | EventKind::PitchBend { .. }
             | EventKind::ChannelPressure { .. }
             | EventKind::PolyPressure { .. } => {}
@@ -89,6 +95,8 @@ pub fn to_command(event: &Event) -> Command {
             pressure,
         },
         EventKind::MasterVolume { level } => Command::SetMasterVolume(f32::from(level) / 16383.0),
+        EventKind::MasterBalance { position } => Command::SetMasterBalance(position),
+        EventKind::MasterTuning { semitones } => Command::SetMasterTuning(semitones),
         EventKind::GeneralMidiReset => Command::Reset,
     }
 }
@@ -180,7 +188,9 @@ fn seek(
     song_time: f64,
     monitor: Option<&SharedMonitor>,
 ) -> usize {
-    let _ = tx.send(Command::AllNotesOff);
+    // Reset first: seeking backwards would otherwise leave controller values
+    // set by events that have not happened yet.
+    let _ = tx.send(Command::Reset);
 
     let index = events.partition_point(|e| e.time_s < song_time);
     for event in &events[..index] {
@@ -189,9 +199,12 @@ fn seek(
         let persistent = match event.kind {
             EventKind::ProgramChange { .. }
             | EventKind::PitchBend { .. }
-            | EventKind::ChannelPressure { .. } => true,
+            | EventKind::ChannelPressure { .. }
+            | EventKind::MasterVolume { .. }
+            | EventKind::MasterBalance { .. }
+            | EventKind::MasterTuning { .. }
+            | EventKind::GeneralMidiReset => true,
             EventKind::Controller { controller, .. } => crate::midi::is_persistent(controller),
-            EventKind::MasterVolume { .. } => true,
             _ => false,
         };
         if persistent {
@@ -232,6 +245,12 @@ fn log_event(event: &Event, now: f64) {
             println!("[{now:7.3}s] ch{ch:2} poly all  #{note} {pressure}")
         }
         EventKind::MasterVolume { level } => println!("[{now:7.3}s] sysex master volume {level}"),
+        EventKind::MasterBalance { position } => {
+            println!("[{now:7.3}s] sysex master balance {position:+.3}")
+        }
+        EventKind::MasterTuning { semitones } => {
+            println!("[{now:7.3}s] sysex master tuning {semitones:+.3} st")
+        }
         EventKind::GeneralMidiReset => println!("[{now:7.3}s] sysex GM reset"),
     }
 }

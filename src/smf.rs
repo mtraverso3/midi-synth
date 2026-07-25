@@ -2,6 +2,8 @@ use std::path::Path;
 
 use midly::{Format, Fps, MetaMessage, MidiMessage, Smf, Timing, TrackEventKind};
 
+use crate::midi::{CENTRE_14_BIT, SystemExclusive};
+
 /// Every MIDI 1.0 channel voice message, carried through as the file wrote it.
 /// Interpreting controllers is the synth's job, not the parser's.
 #[derive(Debug, Clone, Copy)]
@@ -35,6 +37,14 @@ pub enum EventKind {
     /// Universal system exclusive; applies to the whole instrument, not a channel.
     MasterVolume {
         level: u16,
+    },
+    /// Left/right balance, -1.0 hard left to 1.0 hard right.
+    MasterBalance {
+        position: f32,
+    },
+    /// Global detune in semitones.
+    MasterTuning {
+        semitones: f32,
     },
     GeneralMidiReset,
 }
@@ -113,21 +123,50 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
 
     // Merge all tracks onto one timeline, resolving per-track delta-times into
     // absolute ticks.
+    enum Raw<'a> {
+        Track(TrackEventKind<'a>),
+        SysEx(Vec<u8>),
+    }
     struct RawEvent<'a> {
         tick: u64,
-        kind: TrackEventKind<'a>,
+        kind: Raw<'a>,
     }
     let mut raw = Vec::new();
     for track in &smf.tracks {
         let mut abs_tick = 0u64;
+        let mut pending: Option<Vec<u8>> = None;
         for event in track {
             abs_tick += event.delta.as_int() as u64;
+
+            // A SysEx packet not ending in 0xF7 is continued by the escape
+            // events after it, which carry no status byte of their own.
+            let packet = match event.kind {
+                TrackEventKind::SysEx(data) => Some((Vec::new(), data)),
+                TrackEventKind::Escape(data) => pending.take().map(|held| (held, data)),
+                _ => None,
+            };
+            if let Some((mut buffer, data)) = packet {
+                buffer.extend_from_slice(data);
+                match buffer.last() {
+                    Some(&0xF7) => raw.push(RawEvent {
+                        tick: abs_tick,
+                        kind: Raw::SysEx(buffer),
+                    }),
+                    _ => pending = Some(buffer),
+                }
+                continue;
+            }
+
+            if let TrackEventKind::Meta(MetaMessage::EndOfTrack) = event.kind {
+                break;
+            }
             raw.push(RawEvent {
                 tick: abs_tick,
-                kind: event.kind,
+                kind: Raw::Track(event.kind),
             });
         }
     }
+    // Stable, so each track's own order survives where ticks coincide.
     raw.sort_by_key(|e| e.tick);
 
     // Walk the timeline converting ticks to seconds, tracking tempo changes.
@@ -135,29 +174,54 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
     let mut current_seconds = 0.0f64;
     let mut last_tick = 0u64;
 
+    let mut coarse_tuning = 0.0f32;
+    let mut fine_tuning = 0.0f32;
+
     for RawEvent { tick, kind } in raw {
         let delta_ticks = (tick - last_tick) as f64;
         current_seconds += delta_ticks * clock.seconds_per_tick();
         last_tick = tick;
 
+        let kind = match kind {
+            Raw::SysEx(data) => {
+                let Some(message) = crate::midi::parse_system_exclusive(&data) else {
+                    continue;
+                };
+                let kind = match message {
+                    SystemExclusive::MasterVolume(level) => EventKind::MasterVolume { level },
+                    SystemExclusive::MasterBalance(position) => EventKind::MasterBalance {
+                        position: (i32::from(position) - CENTRE_14_BIT) as f32 / 8192.0,
+                    },
+                    SystemExclusive::MasterFineTuning(raw) => {
+                        fine_tuning = (i32::from(raw) - CENTRE_14_BIT) as f32 / 8192.0;
+                        EventKind::MasterTuning {
+                            semitones: coarse_tuning + fine_tuning,
+                        }
+                    }
+                    SystemExclusive::MasterCoarseTuning(msb) => {
+                        coarse_tuning = f32::from(msb) - 64.0;
+                        EventKind::MasterTuning {
+                            semitones: coarse_tuning + fine_tuning,
+                        }
+                    }
+                    SystemExclusive::GeneralMidiReset => {
+                        coarse_tuning = 0.0;
+                        fine_tuning = 0.0;
+                        EventKind::GeneralMidiReset
+                    }
+                };
+                events.push(Event {
+                    time_s: current_seconds,
+                    channel: 0,
+                    kind,
+                });
+                continue;
+            }
+            Raw::Track(kind) => kind,
+        };
+
         if let TrackEventKind::Meta(MetaMessage::Tempo(t)) = kind {
             clock.set_tempo(f64::from(t.as_int()));
-            continue;
-        }
-
-        if let TrackEventKind::SysEx(data) = kind {
-            let kind = match crate::midi::parse_system_exclusive(data) {
-                Some(crate::midi::SystemExclusive::MasterVolume(level)) => {
-                    EventKind::MasterVolume { level }
-                }
-                Some(crate::midi::SystemExclusive::GeneralMidiReset) => EventKind::GeneralMidiReset,
-                None => continue,
-            };
-            events.push(Event {
-                time_s: current_seconds,
-                channel: 0,
-                kind,
-            });
             continue;
         }
 
@@ -205,4 +269,175 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
     }
 
     Ok(events)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use midly::num::{u4, u7, u15, u24, u28};
+    use midly::{Header, Track, TrackEvent};
+
+    fn at(delta: u32, kind: TrackEventKind<'_>) -> TrackEvent<'_> {
+        TrackEvent {
+            delta: u28::new(delta),
+            kind,
+        }
+    }
+
+    fn note_on(delta: u32, note: u8, velocity: u8) -> TrackEvent<'static> {
+        at(
+            delta,
+            TrackEventKind::Midi {
+                channel: u4::new(0),
+                message: MidiMessage::NoteOn {
+                    key: u7::new(note),
+                    vel: u7::new(velocity),
+                },
+            },
+        )
+    }
+
+    fn build(timing: Timing, format: Format, tracks: Vec<Track<'_>>) -> Vec<Event> {
+        let mut bytes = Vec::new();
+        Smf {
+            header: Header::new(format, timing),
+            tracks,
+        }
+        .write(&mut bytes)
+        .unwrap();
+        parse(&bytes).unwrap()
+    }
+
+    fn metrical(track: Track<'_>) -> Vec<Event> {
+        build(
+            Timing::Metrical(u15::new(480)),
+            Format::SingleTrack,
+            vec![track],
+        )
+    }
+
+    #[test]
+    fn a_note_on_at_velocity_zero_is_a_note_off() {
+        let events = metrical(vec![
+            note_on(0, 60, 64),
+            note_on(480, 60, 0),
+            at(0, TrackEventKind::Meta(MetaMessage::EndOfTrack)),
+        ]);
+        assert!(matches!(events[0].kind, EventKind::NoteOn { note: 60, .. }));
+        assert!(matches!(events[1].kind, EventKind::NoteOff { note: 60, .. }));
+    }
+
+    #[test]
+    fn tempo_rescales_only_what_follows_it() {
+        let events = metrical(vec![
+            note_on(0, 60, 64),
+            // One beat at the 120bpm default, then half speed for the next.
+            note_on(480, 61, 64),
+            at(
+                0,
+                TrackEventKind::Meta(MetaMessage::Tempo(u24::new(1_000_000))),
+            ),
+            note_on(480, 62, 64),
+            at(0, TrackEventKind::Meta(MetaMessage::EndOfTrack)),
+        ]);
+        assert!((events[0].time_s - 0.0).abs() < 1e-9);
+        assert!((events[1].time_s - 0.5).abs() < 1e-9);
+        assert!((events[2].time_s - 1.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn timecode_ticks_ignore_tempo() {
+        let events = build(
+            Timing::Timecode(Fps::Fps25, 40),
+            Format::SingleTrack,
+            vec![vec![
+                at(
+                    0,
+                    TrackEventKind::Meta(MetaMessage::Tempo(u24::new(1_000_000))),
+                ),
+                note_on(1000, 60, 64),
+                at(0, TrackEventKind::Meta(MetaMessage::EndOfTrack)),
+            ]],
+        );
+        assert!((events[0].time_s - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn events_after_end_of_track_are_dropped() {
+        let events = metrical(vec![
+            note_on(0, 60, 64),
+            at(0, TrackEventKind::Meta(MetaMessage::EndOfTrack)),
+            note_on(0, 62, 64),
+        ]);
+        assert_eq!(events.len(), 1);
+    }
+
+    #[test]
+    fn tracks_merge_onto_one_timeline() {
+        let events = build(
+            Timing::Metrical(u15::new(480)),
+            Format::Parallel,
+            vec![
+                vec![
+                    note_on(480, 60, 64),
+                    at(0, TrackEventKind::Meta(MetaMessage::EndOfTrack)),
+                ],
+                vec![
+                    note_on(0, 72, 64),
+                    at(0, TrackEventKind::Meta(MetaMessage::EndOfTrack)),
+                ],
+            ],
+        );
+        let notes: Vec<_> = events
+            .iter()
+            .map(|e| match e.kind {
+                EventKind::NoteOn { note, .. } => note,
+                _ => unreachable!(),
+            })
+            .collect();
+        assert_eq!(notes, [72, 60]);
+    }
+
+    #[test]
+    fn a_sysex_split_across_packets_is_reassembled() {
+        let events = metrical(vec![
+            at(0, TrackEventKind::SysEx(&[0x7E, 0x7F])),
+            at(0, TrackEventKind::Escape(&[0x09, 0x01, 0xF7])),
+            at(0, TrackEventKind::Meta(MetaMessage::EndOfTrack)),
+        ]);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0].kind, EventKind::GeneralMidiReset));
+    }
+
+    #[test]
+    fn coarse_and_fine_master_tuning_combine() {
+        let events = metrical(vec![
+            // +2 semitones coarse, then half a semitone sharp on top.
+            at(
+                0,
+                TrackEventKind::SysEx(&[0x7F, 0x7F, 0x04, 0x04, 0x00, 66, 0xF7]),
+            ),
+            at(
+                0,
+                TrackEventKind::SysEx(&[0x7F, 0x7F, 0x04, 0x03, 0x00, 0x60, 0xF7]),
+            ),
+            at(0, TrackEventKind::Meta(MetaMessage::EndOfTrack)),
+        ]);
+        let EventKind::MasterTuning { semitones } = events[1].kind else {
+            panic!("expected a tuning event");
+        };
+        assert!((semitones - 2.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn format_2_and_degenerate_timing_are_rejected() {
+        let mut bytes = Vec::new();
+        Smf {
+            header: Header::new(Format::Sequential, Timing::Metrical(u15::new(480))),
+            tracks: vec![vec![at(0, TrackEventKind::Meta(MetaMessage::EndOfTrack))]],
+        }
+        .write(&mut bytes)
+        .unwrap();
+        assert!(parse(&bytes).is_err());
+    }
 }

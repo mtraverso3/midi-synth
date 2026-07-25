@@ -93,6 +93,9 @@ impl Engine for SoundFontEngine {
                 pressure,
             } => self.midi(channel, POLY_PRESSURE, i32::from(note), i32::from(pressure)),
             Command::SetMasterVolume(level) => self.synth.set_master_volume(level),
+            // Balance is applied on the master bus; rustysynth offers no hook
+            // for a global detune, so master tuning goes unhonoured here.
+            Command::SetMasterBalance(_) | Command::SetMasterTuning(_) => {}
             Command::Reset => self.synth.reset(),
             Command::AllNotesOff => self.synth.note_off_all(true),
             // Intercepted by the pause gate in `engine`.

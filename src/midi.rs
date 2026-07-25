@@ -44,6 +44,13 @@ pub const RPN_FINE_TUNING: (u8, u8) = (0, 1);
 pub const RPN_COARSE_TUNING: (u8, u8) = (0, 2);
 pub const RPN_MODULATION_DEPTH_RANGE: (u8, u8) = (0, 5);
 
+/// Selecting RPN 127/127 deliberately parks data entry so that stray data
+/// messages cannot disturb whichever parameter was last addressed.
+pub const RPN_NULL: (u8, u8) = (127, 127);
+
+/// A 14-bit value centred on 8192, as the tuning RPNs and pitch bend use.
+pub const CENTRE_14_BIT: i32 = 8192;
+
 /// General MIDI starts every channel with this much reverb send.
 pub const DEFAULT_REVERB_SEND: f32 = 40.0 / 127.0;
 
@@ -60,6 +67,26 @@ pub const PEDAL_THRESHOLD: u8 = 64;
 
 /// The default bend range when a file never sets RPN 0, per General MIDI.
 pub const DEFAULT_BEND_SEMITONES: f32 = 2.0;
+
+/// The gain a volume-like controller asks for. General MIDI 2 and DLS both
+/// define channel volume and expression as an attenuation of 40 dB across the
+/// range, which is the square of the fraction rather than the fraction itself.
+/// Read linearly, a fade to CC 7 = 32 only drops 12 dB where it should drop 24,
+/// so mixes come out flat and quiet passages far too loud.
+pub fn volume_gain(value: u8) -> f32 {
+    let unit = f32::from(value) / 127.0;
+    unit * unit
+}
+
+/// Equal-power stereo placement for `position` in -1.0..=1.0: centred keeps
+/// unity gain on both sides, and total power stays constant across the image.
+pub fn stereo_gains(position: f32) -> (f32, f32) {
+    let angle = (position.clamp(-1.0, 1.0) + 1.0) / 2.0 * std::f32::consts::FRAC_PI_2;
+    (
+        angle.cos() * std::f32::consts::SQRT_2,
+        angle.sin() * std::f32::consts::SQRT_2,
+    )
+}
 
 /// Channel mode messages all silence or reset the channel rather than setting
 /// a continuous value.
@@ -78,7 +105,16 @@ pub fn is_persistent(controller: u8) -> bool {
 pub enum SystemExclusive {
     /// Universal master volume, 14-bit.
     MasterVolume(u16),
-    /// "GM System On": reset every channel to General MIDI defaults.
+    /// Universal master balance, 14-bit and centred on 8192.
+    MasterBalance(u16),
+    /// Universal master fine tuning, 14-bit and centred on 8192, spanning a
+    /// semitone either way.
+    MasterFineTuning(u16),
+    /// Universal master coarse tuning; only the MSB is meaningful, in semitones
+    /// offset from 64.
+    MasterCoarseTuning(u8),
+    /// "GM System On" (or its GM2 and GM-off siblings): reset every channel to
+    /// General MIDI defaults.
     GeneralMidiReset,
 }
 
@@ -86,13 +122,100 @@ pub enum SystemExclusive {
 /// the trailing 0xF7, as midly reports it.
 pub fn parse_system_exclusive(data: &[u8]) -> Option<SystemExclusive> {
     let data = data.strip_suffix(&[0xF7]).unwrap_or(data);
+    let wide = |lsb: &u8, msb: &u8| u16::from(*msb) << 7 | u16::from(*lsb);
     match data {
-        // F0 7F <device> 04 01 <lsb> <msb> F7
-        [0x7F, _, 0x04, 0x01, lsb, msb] => Some(SystemExclusive::MasterVolume(
-            u16::from(*msb) << 7 | u16::from(*lsb),
-        )),
-        // F0 7E <device> 09 01 F7
-        [0x7E, _, 0x09, 0x01] => Some(SystemExclusive::GeneralMidiReset),
+        // Universal real time, F0 7F <device> 04 <sub> <lsb> <msb> F7.
+        [0x7F, _, 0x04, 0x01, lsb, msb] => Some(SystemExclusive::MasterVolume(wide(lsb, msb))),
+        [0x7F, _, 0x04, 0x02, lsb, msb] => Some(SystemExclusive::MasterBalance(wide(lsb, msb))),
+        [0x7F, _, 0x04, 0x03, lsb, msb] => Some(SystemExclusive::MasterFineTuning(wide(lsb, msb))),
+        [0x7F, _, 0x04, 0x04, _, msb] => Some(SystemExclusive::MasterCoarseTuning(*msb)),
+        // Universal non-real time, F0 7E <device> 09 <mode> F7. All three modes
+        // — GM on, GM off and GM2 on — put the instrument back to its defaults;
+        // we have only the one sound set to offer either way.
+        [0x7E, _, 0x09, 0x01..=0x03] => Some(SystemExclusive::GeneralMidiReset),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sysex(data: &[u8]) -> Option<SystemExclusive> {
+        parse_system_exclusive(data)
+    }
+
+    #[test]
+    fn reads_master_volume_either_side_of_the_terminator() {
+        let expected = 8192;
+        for payload in [
+            &[0x7F, 0x7F, 0x04, 0x01, 0x00, 0x40][..],
+            &[0x7F, 0x7F, 0x04, 0x01, 0x00, 0x40, 0xF7][..],
+        ] {
+            match sysex(payload) {
+                Some(SystemExclusive::MasterVolume(level)) => assert_eq!(level, expected),
+                _ => panic!("not recognised: {payload:02X?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn reads_the_universal_tuning_and_balance_messages() {
+        assert!(matches!(
+            sysex(&[0x7F, 0x00, 0x04, 0x02, 0x00, 0x40, 0xF7]),
+            Some(SystemExclusive::MasterBalance(8192))
+        ));
+        assert!(matches!(
+            sysex(&[0x7F, 0x00, 0x04, 0x03, 0x00, 0x50, 0xF7]),
+            Some(SystemExclusive::MasterFineTuning(10240))
+        ));
+        assert!(matches!(
+            sysex(&[0x7F, 0x00, 0x04, 0x04, 0x00, 0x42, 0xF7]),
+            Some(SystemExclusive::MasterCoarseTuning(0x42))
+        ));
+    }
+
+    #[test]
+    fn every_general_midi_mode_message_resets() {
+        for mode in [0x01, 0x02, 0x03] {
+            assert!(matches!(
+                sysex(&[0x7E, 0x7F, 0x09, mode, 0xF7]),
+                Some(SystemExclusive::GeneralMidiReset)
+            ));
+        }
+    }
+
+    #[test]
+    fn ignores_manufacturer_sysex() {
+        assert!(sysex(&[0x41, 0x10, 0x42, 0x12, 0xF7]).is_none());
+        assert!(sysex(&[]).is_none());
+    }
+
+    #[test]
+    fn volume_is_a_square_law_taper() {
+        assert_eq!(volume_gain(127), 1.0);
+        assert_eq!(volume_gain(0), 0.0);
+        // Half travel should be a quarter of the power, roughly -12 dB.
+        assert!((volume_gain(64) - 0.254).abs() < 0.001);
+    }
+
+    #[test]
+    fn stereo_placement_holds_its_power() {
+        let power = |(l, r): (f32, f32)| l * l + r * r;
+        for position in [-1.0, -0.5, 0.0, 0.5, 1.0] {
+            assert!((power(stereo_gains(position)) - 2.0).abs() < 1e-5);
+        }
+        assert_eq!(stereo_gains(0.0).0, stereo_gains(0.0).1);
+        assert!(stereo_gains(-1.0).1.abs() < 1e-6);
+        assert!(stereo_gains(2.0).0.abs() < 1e-6);
+    }
+
+    #[test]
+    fn only_the_top_controllers_are_channel_modes() {
+        assert!(!is_channel_mode(cc::SUSTAIN));
+        assert!(is_channel_mode(cc::ALL_SOUND_OFF));
+        assert!(is_channel_mode(cc::POLY_MODE));
+        assert!(is_persistent(cc::VOLUME));
+        assert!(!is_persistent(cc::ALL_NOTES_OFF));
     }
 }

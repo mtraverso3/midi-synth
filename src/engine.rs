@@ -40,6 +40,10 @@ pub enum Command {
     },
     /// Universal master volume, 0.0..=1.0.
     SetMasterVolume(f32),
+    /// Universal master balance, -1.0 hard left to 1.0 hard right.
+    SetMasterBalance(f32),
+    /// Universal master tuning, in semitones.
+    SetMasterTuning(f32),
     /// Reset every channel to General MIDI defaults.
     Reset,
     SetPaused(bool),
@@ -65,6 +69,7 @@ pub fn build(
     let master = Master {
         source,
         gain,
+        balance: (1.0, 1.0),
         limiter: Limiter::new(sample_rate),
     };
     Ok(Box::new(Paused {
@@ -78,19 +83,37 @@ pub fn build(
 struct Master {
     source: Box<dyn Engine>,
     gain: f32,
+    balance: (f32, f32),
     limiter: Limiter,
 }
 
 impl Engine for Master {
     fn handle(&mut self, command: Command) {
-        self.source.handle(command);
+        match command {
+            Command::SetMasterBalance(position) => {
+                self.balance = crate::midi::stereo_gains(position)
+            }
+            Command::Reset => {
+                self.balance = (1.0, 1.0);
+                self.source.handle(command);
+            }
+            other => self.source.handle(other),
+        }
     }
 
     fn fill(&mut self, data: &mut [f32], channels: usize) {
         self.source.fill(data, channels);
-        if self.gain != 1.0 {
-            for sample in data.iter_mut() {
-                *sample *= self.gain;
+        let (left, right) = self.balance;
+        if self.gain != 1.0 || self.balance != (1.0, 1.0) {
+            for frame in data.chunks_mut(channels) {
+                match frame {
+                    [mono] => *mono *= self.gain,
+                    [l, r, ..] => {
+                        *l *= self.gain * left;
+                        *r *= self.gain * right;
+                    }
+                    [] => {}
+                }
             }
         }
         self.limiter.process(data, channels);
