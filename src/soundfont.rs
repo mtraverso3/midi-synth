@@ -109,7 +109,7 @@ impl Engine for SoundFontEngine {
         self.right.resize(frames, 0.0);
         self.synth.render(&mut self.left, &mut self.right);
 
-        for (i, frame) in data.chunks_mut(channels).enumerate() {
+        for (i, frame) in data.chunks_exact_mut(channels).enumerate() {
             write_frame(frame, self.left[i], self.right[i]);
         }
     }

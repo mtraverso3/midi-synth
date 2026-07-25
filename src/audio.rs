@@ -15,7 +15,7 @@ pub fn build_stream(
     let host = cpal::default_host();
     let device = host
         .default_output_device()
-        .expect("no output device available");
+        .ok_or("no audio output device available")?;
 
     // Ask for the device's current configuration. Picking one out of
     // `supported_output_configs` instead can select a Bluetooth headset's
@@ -31,7 +31,7 @@ pub fn build_stream(
         SampleFormat::F32 => run::<f32>(&device, config, rx, soundfont, gain)?,
         SampleFormat::I16 => run::<i16>(&device, config, rx, soundfont, gain)?,
         SampleFormat::U16 => run::<u16>(&device, config, rx, soundfont, gain)?,
-        other => panic!("Unsupported sample format '{other}'"),
+        other => return Err(format!("unsupported sample format '{other}'").into()),
     };
 
     Ok((stream, tx))
@@ -68,9 +68,8 @@ where
             },
             err_fn,
             None,
-        )
-        .unwrap();
+        )?;
 
-    stream.play().unwrap();
+    stream.play()?;
     Ok(stream)
 }
